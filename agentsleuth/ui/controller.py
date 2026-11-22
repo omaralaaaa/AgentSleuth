@@ -176,11 +176,6 @@ class ControllerMixin:
         if not self.result:
             return
         turns = self.result['turns']
-        self._turn_ends = []
-        total = 0
-        for turn in turns:
-            total += len(turn['entries'])
-            self._turn_ends.append(total)
         self.turn_options.configure(values=['Entire conversation'] +
                                     [f'{i + 1:02d} · {short(t["title"], 75)}' for i, t in enumerate(turns)])
         self.turn_options.current(0)
@@ -192,11 +187,16 @@ class ControllerMixin:
         self._render()
 
     def _clear_chat(self):
+        if self._render_timer is not None:
+            self.after_cancel(self._render_timer)
+            self._render_timer = None
         for child in self.chat_frame.winfo_children():
             child.destroy()
         self._photos.clear()
         self.canvas.yview_moveto(0)
 
     def _section(self, label):
-        self._label(self.chat_frame, label, self.DIM, ('Consolas', 10, 'bold'),
-                    anchor='w', justify='left', wraplength=750).pack(fill='x', padx=18, pady=(18, 4))
+        heading = self._label(self.chat_frame, label, self.DIM, ('Consolas', 10, 'bold'),
+                              anchor='w', justify='left', wraplength=750)
+        heading.pack(fill='x', padx=18, pady=(18, 4))
+        self._bind_conversation_wheel_tree(heading)

@@ -38,11 +38,14 @@ class App(LayoutMixin, ControllerMixin, ConversationMixin, tk.Tk):
         self.messages_queue = queue.Queue()
         self._photos = []
         self._working = False
+        self._render_timer = None
         self._style()
         self._build()
         self._poll_timer = self.after(100, self._poll)
 
     def destroy(self):
+        if self._render_timer is not None:
+            self.after_cancel(self._render_timer)
         self.after_cancel(self._poll_timer)
         super().destroy()
 

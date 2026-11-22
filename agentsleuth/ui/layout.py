@@ -203,8 +203,12 @@ class LayoutMixin:
             if steps == 0:
                 steps = -1 if delta > 0 else 1
         try:
+            if isinstance(event.widget, tk.Text):
+                first, last = event.widget.yview()
+                if (steps < 0 and first > 0) or (steps > 0 and last < 1):
+                    event.widget.yview_scroll(steps, 'units')
+                    return 'break'
             self.canvas.yview_scroll(steps, 'units')
         except tk.TclError:
             pass
-        # Prevent nested Text widgets from consuming the event themselves.
         return 'break'

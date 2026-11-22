@@ -1,7 +1,6 @@
 """Render reconstructed messages and correlated execution/activity cards."""
 
 import json
-from bisect import bisect_right
 import ntpath
 import os
 import subprocess
@@ -18,60 +17,46 @@ from ..core.utils import safe_text
 
 
 class ConversationMixin:
-    PAGE_SIZE = 20
-
-    def _render(self, _event=None, *, page=0):
+    def _render(self, _event=None):
         self._clear_chat()
         if not self.result:
             return
         selection = self.turn_options.current()
         turns = self.result['turns']
-        base = self._turn_ends[selection - 2] if selection > 1 else 0
-        end = self._turn_ends[selection - 1 if selection > 0 else -1] if turns else 0
-        if end == base:
+        if selection > 0:
+            turns = turns[selection - 1:selection]
+        total = sum(len(turn['entries']) for turn in turns)
+        if not total:
             self._section('No selected events found in this rollout.')
             return
 
-        start = base + page * self.PAGE_SIZE
-        stop = min(start + self.PAGE_SIZE, end)
-        if end - base > self.PAGE_SIZE:
-            nav = ttk.Frame(self.chat_frame)
-            nav.pack(fill='x', padx=16, pady=6)
-            for title, target, enabled in [('Previous', page - 1, start > base),
-                                            ('Next', page + 1, stop < end)]:
-                ttk.Button(nav, text=title, state='normal' if enabled else 'disabled',
-                           command=lambda p=target: self._render(page=p)).pack(side='left')
-            ttk.Label(nav, text=f'Entries {start-base+1}–{stop-base} of {end-base}').pack(side='left')
-        expected_entries = stop - start
-        rendered_entries = 0
-        render_errors = []
-        for index in range(bisect_right(self._turn_ends, start), len(turns)):
-            turn = turns[index]
-            offset = self._turn_ends[index - 1] if index else 0
-            if offset >= stop:
-                break
-            self._section('Turn · ' + turn['title'])
-            for entry in turn['entries'][max(0, start-offset):stop-offset]:
+        def entries():
+            for turn in turns:
+                for index, entry in enumerate(turn['entries']):
+                    if index == 0:
+                        self._section('Turn · ' + turn['title'])
+                    yield entry
+
+        pending = entries()
+        rendered = errors = 0
+        def append_batch():
+            nonlocal rendered, errors
+            self._render_timer = None
+            for _ in range(min(8, total - rendered)):
+                entry = next(pending)
                 try:
                     self._render_entry(entry)
-                    rendered_entries += 1
                 except Exception as exc:
-                    # One malformed/unknown record must not stop the rest of the
-                    # conversation from rendering. Keep its ordinal visible.
                     ordinal = entry.get('ordinal', '?') if isinstance(entry, dict) else '?'
-                    render_errors.append((ordinal, str(exc)))
                     self._render_error_entry(ordinal, exc)
+                    errors += 1
+                rendered += 1
+            status = f'Showing {rendered} of {total} entries'
+            self.status.set(status + (f' · {errors} render warnings' if errors else ''))
+            if rendered < total:
+                self._render_timer = self.after(10, append_batch)
 
-        self._refresh_conversation_scrollregion()
-        self._bind_conversation_wheel_tree(self.conversation_pane)
-        self.canvas.yview_moveto(0)
-        if render_errors:
-            self.status.set(
-                f'Rendered {rendered_entries}/{expected_entries} entries · '
-                f'{len(render_errors)} item(s) shown with rendering errors'
-            )
-        else:
-            self.status.set(f'Showing entries {start-base+1}–{stop-base} of {end-base}')
+        append_batch()
 
     def _render_error_entry(self, ordinal, error):
         holder = tk.Frame(self.chat_frame, bg=self.BG)
@@ -90,70 +75,40 @@ class ConversationMixin:
         except tk.TclError:
             pass
 
-    def _body(self, parent, content, bg, max_rows=None, monospace=False):
-        """Render the complete body; the outer conversation canvas owns scrolling.
-
-        Earlier versions capped Text widgets at a fixed number of rows and added
-        nested scrollbars. That made long tool outputs look like missing messages.
-        Now every line is included in the card and long lines wrap to the card width.
-        """
-        value = safe_text(content)
+    def _body(self, parent, content, bg, max_rows=12, monospace=False):
+        """Fit short bodies to their wrapped text and scroll long bodies in place."""
         holder = tk.Frame(parent, bg=bg)
         holder.pack(fill='x', padx=13, pady=(3, 10))
-
-        # Start compact, then ask Tk for the real number of display lines after
-        # the widget has its final width. This avoids both clipped long output
-        # and the large blank gaps caused by estimating wraps for nowrap text.
-        txt = tk.Text(holder, height=1, wrap=tk.WORD, bg=bg, fg=self.FG,
-                      insertbackground=self.FG, highlightthickness=0, borderwidth=0,
+        txt = tk.Text(holder, height=1, width=1, wrap=tk.WORD, bg=bg, fg=self.FG,
+                      highlightthickness=0, borderwidth=0, relief='flat',
                       font=('Consolas', 10) if monospace else ('Segoe UI', 10),
-                      padx=2, pady=2, relief='flat',
-                      spacing1=1, spacing3=1)
-        preview = value[:2400]
-        preview = '\n'.join(preview.split('\n')[:16])
-        txt.insert('1.0', preview)
+                      padx=2, pady=2, spacing1=1, spacing3=1)
+        scroll = ttk.Scrollbar(holder, orient='vertical', command=txt.yview)
+        txt.configure(yscrollcommand=scroll.set)
+        value = safe_text(content)
+        txt.insert('1.0', value)
         txt.configure(state='disabled')
-        txt.pack(fill='x', expand=True)
+        txt.pack(side='left', fill='x', expand=True)
+        logical_overflow = value.count('\n') >= max_rows
+        last_width = 0
 
-        last_width = {'value': 0}
-        scheduled = {'value': False}
-
-        def fit_to_content(_event=None):
-            if not txt.winfo_exists():
+        def fit(event):
+            nonlocal last_width
+            if event.width <= 1 or event.width == last_width:
                 return
-            width = txt.winfo_width()
-            if width <= 2 or width == last_width['value'] or scheduled['value']:
-                return
-            last_width['value'] = width
-            scheduled['value'] = True
+            last_width = event.width
+            if logical_overflow:
+                rows = max_rows + 1
+            else:
+                count = txt.count('1.0', 'end-1c', 'displaylines')
+                rows = 1 + (count[0] if count else 0)
+            txt.configure(height=min(max_rows, rows))
+            if rows > max_rows:
+                scroll.pack(side='right', fill='y')
+            else:
+                scroll.pack_forget()
 
-            def apply_height():
-                scheduled['value'] = False
-                try:
-                    if not txt.winfo_exists():
-                        return
-                    measured = txt.count('1.0', 'end-1c', 'displaylines')
-                    # count returns display-line transitions, excluding the final row.
-                    txt.configure(height=1 + (int(measured[0]) if measured else 0))
-                except (tk.TclError, TypeError, ValueError):
-                    # Keep the complete text available even if a platform's Tk
-                    # build does not support display-line counting.
-                    pass
-
-            self.after_idle(apply_height)
-
-        txt.bind('<Configure>', fit_to_content, add='+')
-        self.after_idle(fit_to_content)
-        if len(preview) < len(value):
-            def expand():
-                txt.configure(state='normal')
-                txt.insert('end-1c', value[len(preview):])
-                txt.configure(state='disabled')
-                button.destroy()
-                last_width['value'] = 0
-                fit_to_content()
-            button = ttk.Button(holder, text='Show full text', command=expand)
-            button.pack(anchor='w')
+        txt.bind('<Configure>', fit)
         return txt
 
     def _inner_panel(self, parent, heading, bg='#202328'):
@@ -175,7 +130,7 @@ class ConversationMixin:
             return
         self._label(panel, label, self.DIM, ('Consolas', 9, 'bold')).pack(
             anchor='w', padx=13, pady=(7, 1))
-        self._body(panel, value, panel.cget('bg'), max_rows=22, monospace=True)
+        self._body(panel, value, panel.cget('bg'), max_rows=9, monospace=True)
 
     def _render_entry(self, entry):
         kind = entry['kind']
@@ -207,10 +162,11 @@ class ConversationMixin:
         meta = f'#{entry["ordinal"]}  ·  {entry.get("timestamp", "")[:19].replace("T", " ")} UTC'
         self._label(header, meta, self.DIM, ('Consolas', 8)).pack(side='right')
         if is_message:
-            self._body(card, entry.get('text', ''), bg, max_rows=95)
+            self._body(card, entry.get('text', ''), bg)
             self._file_links(card, entry.get('file_refs', []), entry.get('attachments', []))
         else:
             self._render_activity(card, entry)
+        self._bind_conversation_wheel_tree(holder)
 
     def _render_activity(self, card, entry):
         headings = {
