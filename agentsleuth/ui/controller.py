@@ -190,13 +190,17 @@ class ControllerMixin:
         if self._render_timer is not None:
             self.after_cancel(self._render_timer)
             self._render_timer = None
-        for child in self.chat_frame.winfo_children():
-            child.destroy()
+        self.canvas.delete('all')
+        for _, row in self._rows:
+            row.destroy()
+        self._rows.clear()
+        self._content_height = 0
+        self.canvas.configure(scrollregion=(0, 0, 0, 0))
         self._photos.clear()
         self.canvas.yview_moveto(0)
 
     def _section(self, label):
-        heading = self._label(self.chat_frame, label, self.DIM, ('Consolas', 10, 'bold'),
+        heading = self._label(self._new_row(), label, self.DIM, ('Consolas', 10, 'bold'),
                               anchor='w', justify='left', wraplength=750)
         heading.pack(fill='x', padx=18, pady=(18, 4))
         self._bind_conversation_wheel_tree(heading)

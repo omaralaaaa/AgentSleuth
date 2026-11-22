@@ -55,13 +55,13 @@ class ViewerTest(unittest.TestCase):
         app.geometry('1000x700+10000+10000')
         body = 'line of output\n' * 200
         turns = []
-        for i in range(4):
+        for i in range(20):
             entries = [dict(kind='message', role='user', ordinal=i*11+j, text=body)
                        for j in range(11)]
             turns.append(dict(title=str(i), entries=entries))
         turns[-1]['entries'][-1]['text'] = 'Last short message'
-        app.result = dict(turns=turns, summary=dict(turns=4, activities=0,
-                          attachments=0, recovered_files=0, max_ordinal=43),
+        app.result = dict(turns=turns, summary=dict(turns=20, activities=0,
+                          attachments=0, recovered_files=0, max_ordinal=219),
                           output_directory='.')
         app._after_reconstruct()
         app.update()
@@ -72,7 +72,7 @@ class ViewerTest(unittest.TestCase):
                 yield from widgets(child)
 
         def bodies():
-            return [w for w in widgets(app.chat_frame) if isinstance(w, tk.Text)]
+            return [w for w in widgets(app.canvas) if isinstance(w, tk.Text)]
 
         def finish_render():
             deadline = time.monotonic() + 10
@@ -83,7 +83,16 @@ class ViewerTest(unittest.TestCase):
             self.assertIsNone(app._render_timer)
 
         finish_render()
-        self.assertEqual(len(bodies()), 44)
+        self.assertEqual(len(bodies()), 220)
+        self.assertGreater(app._content_height, 32767)
+        app.canvas.yview_moveto(1)
+        app.update()
+        last = bodies()[-1]
+        self.assertTrue(last.winfo_ismapped(), (app.canvas.yview(), app.canvas.bbox(app._rows[-1][0]),
+                                                app._content_height, app.canvas.winfo_height()))
+        self.assertTrue(0 <= last.winfo_rooty() - app.canvas.winfo_rooty() < app.canvas.winfo_height())
+        app.canvas.yview_moveto(0)
+        app.update()
         self.assertEqual(int(bodies()[-1]['height']), 1)
         first = bodies()[0]
         self.assertEqual(first.get('1.0', 'end-1c'), body)

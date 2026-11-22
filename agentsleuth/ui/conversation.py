@@ -59,7 +59,7 @@ class ConversationMixin:
         append_batch()
 
     def _render_error_entry(self, ordinal, error):
-        holder = tk.Frame(self.chat_frame, bg=self.BG)
+        holder = tk.Frame(self._new_row(), bg=self.BG)
         holder.pack(fill='x', padx=16, pady=5)
         card = tk.Frame(holder, bg='#30272a', highlightthickness=1, highlightbackground='#70545b')
         card.pack(fill='x')
@@ -69,11 +69,33 @@ class ConversationMixin:
                     anchor='w', justify='left', wraplength=max(420, self.canvas.winfo_width() - 100)).pack(
                         fill='x', padx=12, pady=(2, 8))
 
-    def _refresh_conversation_scrollregion(self):
-        try:
-            self.canvas.configure(scrollregion=self.canvas.bbox('all'))
-        except tk.TclError:
-            pass
+    def _new_row(self):
+        row = tk.Frame(self.canvas, bg=self.BG)
+        item = self.canvas.create_window(0, self._content_height, anchor='nw',
+                                         width=max(1, self.canvas.winfo_width()), window=row)
+        self._rows.append((item, row))
+        row.bind('<Configure>', self._schedule_row_layout)
+        self._schedule_row_layout()
+        return row
+
+    def _schedule_row_layout(self, _event=None):
+        if self._layout_timer is None:
+            self._layout_timer = self.after_idle(self._layout_rows)
+
+    def _layout_rows(self):
+        self._layout_timer = None
+        first, last = self.canvas.yview()
+        at_bottom = first > 0 and last >= 1
+        y = 0
+        for item, row in self._rows:
+            if getattr(row, '_layout_y', None) != y:
+                self.canvas.coords(item, 0, y)
+                row._layout_y = y
+            y += row.winfo_reqheight()
+        self._content_height = y
+        self.canvas.configure(scrollregion=(0, 0, self.canvas.winfo_width(), y))
+        if at_bottom:
+            self.canvas.yview_moveto(1)
 
     def _body(self, parent, content, bg, max_rows=12, monospace=False):
         """Fit short bodies to their wrapped text and scroll long bodies in place."""
@@ -87,9 +109,10 @@ class ConversationMixin:
         txt.configure(yscrollcommand=scroll.set)
         value = safe_text(content)
         txt.insert('1.0', value)
-        txt.configure(state='disabled')
+        logical_rows = value.count('\n') + 1
+        txt.configure(state='disabled', height=min(logical_rows, max_rows))
         txt.pack(side='left', fill='x', expand=True)
-        logical_overflow = value.count('\n') >= max_rows
+        logical_overflow = logical_rows > max_rows
         last_width = 0
 
         def fit(event):
@@ -137,7 +160,7 @@ class ConversationMixin:
         is_message = kind == 'message'
         user = is_message and entry.get('role') == 'user'
         bg = '#28313b' if user else self.PANEL if is_message else '#25282d'
-        holder = tk.Frame(self.chat_frame, bg=self.BG)
+        holder = tk.Frame(self._new_row(), bg=self.BG)
         holder.pack(fill='x', padx=(72, 16) if user else (16, 72) if is_message else (16, 16), pady=7)
         card = tk.Frame(holder, bg=bg, highlightthickness=1, highlightbackground=self.BORDER)
         card.pack(fill='x')

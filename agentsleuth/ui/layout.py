@@ -147,11 +147,12 @@ class LayoutMixin:
         self.canvas.configure(yscrollcommand=scroll.set)
         scroll.pack(side='right', fill='y')
         self.canvas.pack(side='left', fill='both', expand=True)
-        self.chat_frame = tk.Frame(self.canvas, bg=self.BG)
-        self.window_id = self.canvas.create_window((0, 0), anchor='nw', window=self.chat_frame)
-        self.chat_frame.bind('<Configure>', lambda _: self._refresh_conversation_scrollregion())
+        # Keep native windows card-sized. One transcript-height window can be
+        # clipped by the Windows window manager far down a long conversation.
+        self._rows = []
+        self._layout_timer = None
+        self._content_height = 0
         self.canvas.bind('<Configure>', self._resize)
-        self.canvas.bind('<Configure>', lambda _e: self.after_idle(self._refresh_conversation_scrollregion), add='+')
 
         # Put a custom bindtag before Text/Treeview class bindings so the main
         # conversation canvas receives the wheel anywhere inside the pane.
@@ -170,7 +171,9 @@ class LayoutMixin:
         self._filter_timer = self.after(150, apply_filter)
 
     def _resize(self, event):
-        self.canvas.itemconfigure(self.window_id, width=event.width)
+        for item, _ in self._rows:
+            self.canvas.itemconfigure(item, width=event.width)
+        self._schedule_row_layout()
         for lbl in (self.thread_title, self.thread_permissions, self.thread_cwd, self.thread_rollout):
             lbl.configure(wraplength=max(420, event.width - 55))
 

@@ -44,6 +44,8 @@ class App(LayoutMixin, ControllerMixin, ConversationMixin, tk.Tk):
         self._poll_timer = self.after(100, self._poll)
 
     def destroy(self):
+        if self._layout_timer is not None:
+            self.after_cancel(self._layout_timer)
         if self._render_timer is not None:
             self.after_cancel(self._render_timer)
         self.after_cancel(self._poll_timer)
