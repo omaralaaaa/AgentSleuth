@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+AgentSleuth_Results/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.jsonl
