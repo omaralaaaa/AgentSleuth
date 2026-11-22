@@ -5,10 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agentsleuth.attachments import extract_file_markers
-from agentsleuth.codex_parser import classify
-from agentsleuth.database import load_threads
-from agentsleuth.reconstruction import reconstruct_from_thread
+from agentsleuth.parsers.codex.attachments import extract_file_markers
+from agentsleuth.parsers.codex.events import classify
+from agentsleuth.parsers.codex import load_threads, reconstruct_from_thread
 
 
 SOURCE_SAMPLE = Path(__file__).resolve().parent / "fixtures" / "sample_rollout.jsonl"

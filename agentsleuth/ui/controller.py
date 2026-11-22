@@ -5,9 +5,7 @@ import threading
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
-from ..database import load_threads
-from ..reconstruction import reconstruct_from_thread
-from ..utils import short
+from ..core.utils import short
 
 
 
@@ -15,8 +13,7 @@ from ..utils import short
 
 class ControllerMixin:
     def _browse_db(self):
-        path = filedialog.askopenfilename(title='Choose Codex state SQLite', filetypes=[
-            ('SQLite databases', '*.sqlite *.sqlite3 *.db'), ('All files', '*.*')])
+        path = filedialog.askopenfilename(title=self.parser.source_hint, filetypes=self.parser.filetypes)
         if path:
             self.db_path.set(path)
             self._load()
@@ -36,24 +33,24 @@ class ControllerMixin:
         self._working = busy
         self.load_button.configure(state='disabled' if busy else 'normal')
         if busy:
-            self.progress.configure(mode='indeterminate')
-            self.progress.start(10)
+            self.progress.pack(side='right', padx=(12, 0))
+            self.progress.start(30)
         else:
             self.progress.stop()
-            self.progress.configure(value=0)
+            self.progress.pack_forget()
 
     def _load(self):
         if self._working:
             return
         path = Path(self.db_path.get().strip().strip('"'))
         if not path.is_file():
-            messagebox.showerror('Missing SQLite file', 'Select an existing state_5.sqlite database.')
+            messagebox.showerror('Missing source file', self.parser.source_hint)
             return
         self._set_busy(True)
-        self.status.set('Reading threads table (read-only)…')
+        self.status.set(f'Reading {self.parser.name} conversations…')
         def task():
             try:
-                data = load_threads(path)
+                data = self.parser.load_threads(path)
                 self.messages_queue.put(('loaded', data))
             except Exception as error:
                 self.messages_queue.put(('error', str(error)))
@@ -117,7 +114,7 @@ class ControllerMixin:
         self._set_busy(True)
         def task():
             try:
-                data = reconstruct_from_thread(
+                data = self.parser.reconstruct_from_thread(
                     selected_db, thread, selected_root,
                     lambda s: self.messages_queue.put(('progress', s)))
                 self.messages_queue.put(('reconstructed', (thread_index, cache_key, data)))
@@ -158,10 +155,10 @@ class ControllerMixin:
                 self.conversation_stats.configure(text='')
                 if self.threads and self.conversations.get_children(''):
                     self.status.set(
-                        f'Loaded {len(value)} conversations · select one to parse its rollout'
+                        f'Loaded {len(value)} conversations · select one to view'
                     )
                 else:
-                    self.status.set(f'Loaded {len(value)} conversations from SQLite threads')
+                    self.status.set(f'Loaded {len(value)} conversations')
             elif kind == 'reconstructed':
                 self._set_busy(False)
                 idx, key, result = value
@@ -173,7 +170,7 @@ class ControllerMixin:
                 self._set_busy(False)
                 self.status.set('Error while loading evidence')
                 messagebox.showerror('AgentSleuth', str(value))
-        self.after(100, self._poll)
+        self._poll_timer = self.after(100, self._poll)
 
     def _after_reconstruct(self):
         if not self.result:
@@ -201,5 +198,5 @@ class ControllerMixin:
         self.canvas.yview_moveto(0)
 
     def _section(self, label):
-        self._label(self.chat_frame, label, '#87a5ca', ('Segoe UI', 10, 'bold'),
+        self._label(self.chat_frame, label, self.DIM, ('Consolas', 10, 'bold'),
                     anchor='w', justify='left', wraplength=750).pack(fill='x', padx=18, pady=(18, 4))

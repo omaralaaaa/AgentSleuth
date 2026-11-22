@@ -4,7 +4,8 @@ import json
 import re
 
 from .attachments import all_embedded_refs, extract_file_markers, extract_text_and_media
-from .utils import get_turn, safe_text, short
+from ...core.utils import safe_text, short
+from .metadata import get_turn
 
 
 def classify(record):

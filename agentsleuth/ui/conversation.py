@@ -10,8 +10,8 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from ..paths import _path_from_stored
-from ..utils import safe_text
+from ..core.paths import _path_from_stored
+from ..core.utils import safe_text
 
 
 
@@ -76,11 +76,11 @@ class ConversationMixin:
     def _render_error_entry(self, ordinal, error):
         holder = tk.Frame(self.chat_frame, bg=self.BG)
         holder.pack(fill='x', padx=16, pady=5)
-        card = tk.Frame(holder, bg='#3a2028', highlightthickness=1, highlightbackground='#87404b')
+        card = tk.Frame(holder, bg='#30272a', highlightthickness=1, highlightbackground='#70545b')
         card.pack(fill='x')
-        self._label(card, f'RENDER WARNING · ordinal {ordinal}', '#ffb7bd',
-                    ('Segoe UI', 9, 'bold')).pack(anchor='w', padx=12, pady=(8, 2))
-        self._label(card, safe_text(error), self.FG, ('Segoe UI', 9),
+        self._label(card, f'RENDER WARNING · ordinal {ordinal}', '#e4b5bb',
+                    ('Consolas', 9, 'bold')).pack(anchor='w', padx=12, pady=(8, 2))
+        self._label(card, safe_text(error), self.FG, ('Consolas', 9),
                     anchor='w', justify='left', wraplength=max(420, self.canvas.winfo_width() - 100)).pack(
                         fill='x', padx=12, pady=(2, 8))
 
@@ -156,10 +156,10 @@ class ConversationMixin:
             button.pack(anchor='w')
         return txt
 
-    def _inner_panel(self, parent, heading, bg='#203047'):
-        shell = tk.Frame(parent, bg=bg, highlightthickness=1, highlightbackground='#37506b')
+    def _inner_panel(self, parent, heading, bg='#202328'):
+        shell = tk.Frame(parent, bg=bg, highlightthickness=1, highlightbackground=self.BORDER)
         shell.pack(fill='x', padx=12, pady=(6, 8))
-        self._label(shell, heading, self.ACCENT, ('Segoe UI', 10, 'bold')).pack(anchor='w', padx=12, pady=(9, 2))
+        self._label(shell, heading, self.ACCENT, ('Consolas', 10, 'bold')).pack(anchor='w', padx=12, pady=(9, 2))
         return shell
 
     def _field(self, panel, label, value, multiline=False):
@@ -169,11 +169,11 @@ class ConversationMixin:
             # Compact readable metadata: no two-line Text widget for every field.
             wrap = max(420, self.canvas.winfo_width() - 145)
             line = f'{label}:  {value}'
-            self._label(panel, line, self.FG, ('Segoe UI', 9),
+            self._label(panel, line, self.FG, ('Consolas', 9),
                         anchor='w', justify='left', wraplength=wrap).pack(
                             fill='x', padx=13, pady=(4, 3))
             return
-        self._label(panel, label, '#9ebada', ('Segoe UI', 9, 'bold')).pack(
+        self._label(panel, label, self.DIM, ('Consolas', 9, 'bold')).pack(
             anchor='w', padx=13, pady=(7, 1))
         self._body(panel, value, panel.cget('bg'), max_rows=22, monospace=True)
 
@@ -181,7 +181,7 @@ class ConversationMixin:
         kind = entry['kind']
         is_message = kind == 'message'
         user = is_message and entry.get('role') == 'user'
-        bg = '#16382f' if user else '#1a2a40' if is_message else '#14283b'
+        bg = '#28313b' if user else self.PANEL if is_message else '#25282d'
         holder = tk.Frame(self.chat_frame, bg=self.BG)
         holder.pack(fill='x', padx=(72, 16) if user else (16, 72) if is_message else (16, 16), pady=7)
         card = tk.Frame(holder, bg=bg, highlightthickness=1, highlightbackground=self.BORDER)
@@ -189,7 +189,7 @@ class ConversationMixin:
         header = tk.Frame(card, bg=bg)
         header.pack(fill='x', padx=13, pady=(10, 2))
         if is_message:
-            label = 'YOU' if user else 'CODEX' + (' · ' + entry['phase'] if entry.get('phase') else '')
+            label = 'YOU' if user else self.parser.name.upper() + (' · ' + entry['phase'] if entry.get('phase') else '')
         else:
             activity_labels = {
                 'CommandExecution': 'EXECUTION · COMMAND',
@@ -202,10 +202,10 @@ class ConversationMixin:
                 entry.get('activity_type'),
                 'ACTIVITY · ' + entry.get('activity_type', 'UNKNOWN')
             )
-        self._label(header, label, self.ACCENT if is_message else '#91d8f2',
-                    ('Segoe UI', 10, 'bold')).pack(side='left')
+        self._label(header, label, self.ACCENT if is_message else self.DIM,
+                    ('Consolas', 10, 'bold')).pack(side='left')
         meta = f'#{entry["ordinal"]}  ·  {entry.get("timestamp", "")[:19].replace("T", " ")} UTC'
-        self._label(header, meta, self.DIM, ('Segoe UI', 8)).pack(side='right')
+        self._label(header, meta, self.DIM, ('Consolas', 8)).pack(side='right')
         if is_message:
             self._body(card, entry.get('text', ''), bg, max_rows=95)
             self._file_links(card, entry.get('file_refs', []), entry.get('attachments', []))
@@ -277,8 +277,8 @@ class ConversationMixin:
             label_text += f'  {suffix}'
         exists = bool(target and Path(target).is_file())
         label = self._label(
-            row, label_text, '#6fe3d1' if exists else self.FG,
-            ('Segoe UI', 9, 'underline') if exists else ('Segoe UI', 9),
+            row, label_text, self.ACCENT if exists else self.FG,
+            ('Consolas', 9, 'underline') if exists else ('Consolas', 9),
             cursor='hand2' if exists else 'arrow', anchor='w'
         )
         label.pack(anchor='w')

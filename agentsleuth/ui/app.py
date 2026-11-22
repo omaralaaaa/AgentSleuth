@@ -5,27 +5,29 @@ from pathlib import Path
 import tkinter as tk
 
 from .layout import LayoutMixin
+from ..parsers import codex
 from .controller import ControllerMixin
 from .conversation import ConversationMixin
 
 
 class App(LayoutMixin, ControllerMixin, ConversationMixin, tk.Tk):
-    BG = '#0d1422'
-    PANEL = '#142034'
-    FG = '#ebf2fc'
-    DIM = '#a5b4cb'
-    ACCENT = '#4bd8b2'
-    BORDER = '#30415b'
+    BG = '#191b1f'
+    PANEL = '#23262b'
+    FG = '#dee1e5'
+    DIM = '#adb3bc'
+    ACCENT = '#99b5d3'
+    BORDER = '#454a53'
 
-    def __init__(self):
+    def __init__(self, parser=codex):
         super().__init__()
-        self.title('AgentSleuth — Codex Forensic Conversation Viewer')
+        self.parser = parser
+        self.title(f'AgentSleuth — {parser.name} Forensic Conversation Viewer')
         self.geometry('1390x830')
         self.minsize(900, 620)
         self.configure(bg=self.BG)
         self.db_path = tk.StringVar()
         self.output_root = tk.StringVar(value=str(Path(__file__).resolve().parents[2] / 'AgentSleuth_Results'))
-        self.status = tk.StringVar(value='Select Codex state_5.sqlite to load conversations')
+        self.status = tk.StringVar(value=parser.source_hint)
         self.filter_text = tk.StringVar()
         self.threads = []
         self.visible_index = []
@@ -38,7 +40,11 @@ class App(LayoutMixin, ControllerMixin, ConversationMixin, tk.Tk):
         self._working = False
         self._style()
         self._build()
-        self.after(100, self._poll)
+        self._poll_timer = self.after(100, self._poll)
+
+    def destroy(self):
+        self.after_cancel(self._poll_timer)
+        super().destroy()
 
 
 def main():

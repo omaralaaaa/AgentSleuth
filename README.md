@@ -19,45 +19,26 @@ python main.py
 ## Project layout
 
 ```text
-AgentSleuth_Modular/
-├── script.py                    # uv-compatible launcher
-├── main.py                      # python launcher
-├── agentsleuth/
-│   ├── config.py                # Limits, MIME types, regex patterns
-│   ├── utils.py                 # Shared text, turn, hash helpers
-│   ├── database.py              # Read-only SQLite access and threads table
-│   ├── paths.py                 # Rollout path resolution and output folders
-│   ├── attachments.py           # Base64 decoding and attachment markers
-│   ├── codex_parser.py          # Record classification, normalization, correlation
-│   ├── recovery.py              # Rebuild files represented in FileChange events
-│   ├── reconstruction.py        # Full rollout-to-conversation pipeline
-│   ├── formatting.py            # Pretty formatting for tool inputs/outputs
-│   └── ui/
-│       ├── app.py               # Tk root and application startup
-│       ├── layout.py            # Window layout, styles and scrolling
-│       ├── controller.py        # Loading DB, selecting threads, background tasks
-│       └── conversation.py      # Rendering messages, tools, executions and file links
-└── tests/
-    └── test_core.py             # Core parser and SQLite tests
+agentsleuth/
+    core/            Shared text, formatting and filesystem helpers
+    parsers/
+        codex/       SQLite discovery, JSONL events, attachments and recovery
+    ui/              Desktop layout, background controller and transcript viewer
+tests/               Parser fixtures, reconstruction tests and GUI regressions
+main.py              Python launcher
+script.py            uv-compatible launcher
 ```
 
-## Module responsibilities
+### Adding an evidence parser
 
-| File | Responsibility |
-|---|---|
-| `config.py` | Global limits, recognized attachment fields and marker patterns |
-| `utils.py` | Reusable small helpers shared across modules |
-| `database.py` | Read `threads` from SQLite without modifying the database |
-| `paths.py` | Resolve `rollout_path`, sanitize output folder names |
-| `attachments.py` | Decode known Base64/data-URI attachment fields; extract filename/path markers |
-| `codex_parser.py` | Classify and normalize Codex records; correlate tool calls and activities |
-| `recovery.py` | Recover content explicitly recorded in `FileChange` items |
-| `reconstruction.py` | Orchestrate the full reconstruction workflow |
-| `formatting.py` | Format JSON-like arguments and tool output for display |
-| `ui/layout.py` | Build the Tkinter window and apply styles |
-| `ui/controller.py` | UI actions and background loading/reconstruction |
-| `ui/conversation.py` | Render reconstructed conversation cards and safe file-location links |
-| `ui/app.py` | Create the Tk root and combine UI mixins |
+Create a sibling package under `agentsleuth/parsers/`. Its public module should
+expose `name`, `source_label`, `source_hint`, `filetypes`, `load_threads(path)` and
+`reconstruct_from_thread(path, thread, output_root, progress)`. The desktop app
+accepts the module as `App(parser=provider)` and defaults to Codex.
+Use the Codex provider's thread and reconstruction dictionaries as the current
+viewer contract (including turns, ordered entries, summary and extracted-file
+metadata). Keep raw-format handling in the provider and add representative
+fixtures under `tests/`.
 
 ## Tests
 

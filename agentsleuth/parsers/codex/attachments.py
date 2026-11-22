@@ -13,7 +13,8 @@ from .config import (
     BASE64_FIELD_NAMES, IMAGE_EXT, AUDIO_EXT, SPECIAL_EXT,
     FILE_MARKER_RE, FILE_PATH_RE, FILE_NAME_RE,
 )
-from .utils import get_turn, safe_text
+from ...core.utils import safe_text
+from .metadata import get_turn
 
 
 class AttachmentExtractor:
