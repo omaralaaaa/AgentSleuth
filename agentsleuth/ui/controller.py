@@ -6,6 +6,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 from ..core.utils import short
+from ..core.search import TranscriptIndex
 
 
 
@@ -117,6 +118,7 @@ class ControllerMixin:
                 data = self.parser.reconstruct_from_thread(
                     selected_db, thread, selected_root,
                     lambda s: self.messages_queue.put(('progress', s)))
+                data['_search_index'] = TranscriptIndex(data['turns'])
                 self.messages_queue.put(('reconstructed', (thread_index, cache_key, data)))
             except Exception as error:
                 self.messages_queue.put(('parse_error', str(error)))
@@ -124,8 +126,6 @@ class ControllerMixin:
 
     def _display_header(self, thread):
         self.thread_title.configure(text=thread['name'])
-        self.thread_permissions.configure(text='Permissions: ' + thread['permissions'] +
-                                          ('   |   Approval: ' + str(thread['approval_policy']) if thread['approval_policy'] else ''))
         self.thread_cwd.configure(text='Working directory (cwd): ' + (thread['cwd'] or 'Unknown'))
         self.thread_rollout.configure(text='Rollout: ' + (thread['rollout_path'] or 'Not recorded'))
 
@@ -147,7 +147,6 @@ class ControllerMixin:
                 self._populate_threads()
                 self._clear_chat()
                 self.thread_title.configure(text='Select a conversation')
-                self.thread_permissions.configure(text='')
                 self.thread_cwd.configure(text='')
                 self.thread_rollout.configure(text='')
                 self.turn_options.configure(values=['Entire conversation'])
@@ -176,6 +175,8 @@ class ControllerMixin:
         if not self.result:
             return
         turns = self.result['turns']
+        self._clear_chat()
+        self._index = self.result.get('_search_index') or TranscriptIndex(turns)
         self.turn_options.configure(values=['Entire conversation'] +
                                     [f'{i + 1:02d} · {short(t["title"], 75)}' for i, t in enumerate(turns)])
         self.turn_options.current(0)
@@ -191,9 +192,11 @@ class ControllerMixin:
             self.after_cancel(self._render_timer)
             self._render_timer = None
         self.canvas.delete('all')
-        for _, row in self._rows:
+        for row in self.canvas.winfo_children():
             row.destroy()
         self._rows.clear()
+        self._row_cache.clear()
+        self._collapsed_prompts = set()
         self._content_height = 0
         self.canvas.configure(scrollregion=(0, 0, 0, 0))
         self._photos.clear()

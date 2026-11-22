@@ -1,6 +1,7 @@
 """Orchestrate rollout parsing, correlation, attachment extraction and recovery."""
 
 import json
+from bisect import bisect_right
 from pathlib import Path
 
 from .attachments import AttachmentExtractor
@@ -10,6 +11,7 @@ from .events import (
 )
 from .paths import rollout_for_thread, _result_dir
 from .recovery import _recover_file_changes
+from .metadata import prompt_permissions
 from ...core.utils import short
 
 
@@ -21,6 +23,8 @@ def reconstruct_from_thread(db_path: Path, thread: dict, root: Path, progress=No
     messages, calls, outputs, activities = [], [], [], []
     valid, invalid, max_ordinal = 0, 0, -1
     session = {}
+    contexts = {}
+    active_turn = None
     with source.open('r', encoding='utf-8-sig', errors='replace') as handle:
         for line_no, line in enumerate(handle, 1):
             if not line.strip():
@@ -40,6 +44,18 @@ def reconstruct_from_thread(db_path: Path, thread: dict, root: Path, progress=No
                     'cwd': p.get('cwd'),
                     'cli_version': p.get('cli_version'),
                 }
+            payload = record.get('payload') or {}
+            if not isinstance(payload, dict):
+                continue
+            if record.get('type') == 'event_msg':
+                if payload.get('type') in ('task_started', 'turn_started'):
+                    active_turn = payload.get('turn_id')
+                elif payload.get('type') in ('task_complete', 'turn_complete', 'turn_aborted'):
+                    active_turn = None
+            if record.get('type') == 'turn_context':
+                turn_id = payload.get('turn_id') or active_turn
+                if turn_id:
+                    contexts.setdefault(turn_id, []).append((line_no, prompt_permissions(payload)))
             ordinal = record.get('ordinal')
             if not isinstance(ordinal, int) or isinstance(ordinal, bool) or ordinal < 0:
                 continue
@@ -50,6 +66,8 @@ def reconstruct_from_thread(db_path: Path, thread: dict, root: Path, progress=No
                 continue
             record = extractor.sanitize(record, record)
             if (m := normalize_message(record)):
+                m['turn_id'] = m['turn_id'] or active_turn or ''
+                m['_source_line'] = line_no
                 messages.append(m)
             if (c := normalize_call(record)):
                 calls.append(c)
@@ -60,6 +78,13 @@ def reconstruct_from_thread(db_path: Path, thread: dict, root: Path, progress=No
             if progress and line_no % 250 == 0:
                 progress(f'Parsing rollout: {line_no:,} lines…')
     messages = deduplicate_messages(messages)
+    for message in messages:
+        line = message.pop('_source_line')
+        if message['role'] == 'user':
+            snapshots = contexts.get(message['turn_id'], ())
+            # The first context record can follow the prompt in the same turn.
+            position = bisect_right(snapshots, line, key=lambda snapshot: snapshot[0])
+            message['permissions'] = snapshots[max(0, position - 1)][1] if snapshots else 'Not recorded'
     # Keep this correlation pass even though calls/outputs are not rendered.
     # call_id + output ordinal delimit candidate executions; command matching
     # then associates each activity with its likely parent tool call.

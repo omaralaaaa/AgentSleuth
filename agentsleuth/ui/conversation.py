@@ -18,44 +18,96 @@ from .powershell import insert_command, is_powershell
 
 
 class ConversationMixin:
-    def _render(self, _event=None):
-        self._clear_chat()
+    def _schedule_search(self, *_):
+        if self._search_timer is not None:
+            self.after_cancel(self._search_timer)
+        def apply():
+            self._search_timer = None
+            if self.result and not self._working:
+                self._render()
+        self._search_timer = self.after(120, apply)
+
+    def _render(self, _event=None, *, keep_position=False):
         if not self.result:
             return
-        selection = self.turn_options.current()
-        turns = self.result['turns']
-        if selection > 0:
-            turns = turns[selection - 1:selection]
-        total = sum(len(turn['entries']) for turn in turns)
-        if not total:
-            self._section('No selected events found in this rollout.')
-            return
-
-        def entries():
-            for turn in turns:
-                for index, entry in enumerate(turn['entries']):
-                    if index == 0:
-                        self._section('Turn · ' + turn['title'])
-                    yield entry
-
-        pending = entries()
-        rendered = errors = 0
-        def append_batch():
-            nonlocal rendered, errors
+        if self._render_timer is not None:
+            self.after_cancel(self._render_timer)
             self._render_timer = None
-            for _ in range(min(8, total - rendered)):
-                entry = next(pending)
-                try:
-                    self._render_entry(entry)
-                except Exception as exc:
-                    ordinal = entry.get('ordinal', '?') if isinstance(entry, dict) else '?'
-                    self._render_error_entry(ordinal, exc)
-                    errors += 1
-                rendered += 1
-            status = f'Showing {rendered} of {total} entries'
+        selection = self.turn_options.current()
+        matches = self._index.matches(self.query.get(), self.entry_type.get(),
+                                      selection - 1 if selection > 0 else None)
+        requested = []
+        previous = None
+        current_prompt = None
+        total = 0
+        hidden = 0
+        for turn, _, entry in matches:
+            if turn != previous:
+                requested.append((('turn', turn), f'Turn {turn + 1}'))
+                previous = turn
+                current_prompt = None
+            total += 1
+            prompt = self._index.prompt_for.get(id(entry))
+            if prompt is not None:
+                if current_prompt != id(prompt):
+                    requested.append((id(prompt), prompt))
+                    current_prompt = id(prompt)
+                if current_prompt in self._collapsed_prompts:
+                    hidden += 1
+                    continue
+            elif entry.get('role') == 'user':
+                current_prompt = id(entry)
+            requested.append((id(entry), entry))
+        if not requested:
+            requested.append(('empty', 'No matching entries in this view.'))
+        wanted = {key for key, _ in requested}
+        for key, (item, row) in self._row_cache.items():
+            if key not in wanted and row._shown:
+                self.canvas.itemconfigure(item, state='hidden')
+                row._shown = False
+        self._rows.clear()
+        if not keep_position:
+            self.canvas.yview_moveto(0)
+        pending = iter(requested)
+        processed = errors = 0
+        def append_batch():
+            nonlocal processed, errors
+            self._render_timer = None
+            created = 0
+            while processed < len(requested) and created < 8:
+                key, value = next(pending)
+                processed += 1
+                if key in self._row_cache:
+                    item, row = self._row_cache[key]
+                    if not row._shown:
+                        self.canvas.itemconfigure(item, state='normal', width=self.canvas.winfo_width())
+                        row._shown = True
+                    self._rows.append((item, row))
+                    continue
+                if isinstance(value, str):
+                    self._section(value)
+                else:
+                    try:
+                        self._render_entry(value)
+                    except Exception as exc:
+                        self._render_error_entry(value.get('ordinal', '?'), exc)
+                        errors += 1
+                item, row = self._rows[-1]
+                row._shown = True
+                self._row_cache[key] = item, row
+                created += 1
+            self._schedule_row_layout()
+            status = f'{total} matching entries'
+            if hidden:
+                status += f' · {hidden} collapsed'
             self.status.set(status + (f' · {errors} render warnings' if errors else ''))
-            if rendered < total:
+            if processed < len(requested):
                 self._render_timer = self.after(10, append_batch)
+            elif created:
+                # Unmapped cards can finish requesting their heights without
+                # receiving a Configure event. Measure after Tk settles geometry.
+                self.update_idletasks()
+                self._schedule_row_layout()
 
         append_batch()
 
@@ -138,12 +190,6 @@ class ConversationMixin:
         txt.bind('<Configure>', fit)
         return txt
 
-    def _inner_panel(self, parent, heading, bg='#202328'):
-        shell = tk.Frame(parent, bg=bg, highlightthickness=1, highlightbackground=self.BORDER)
-        shell.pack(fill='x', padx=12, pady=(6, 8))
-        self._label(shell, heading, self.ACCENT, ('Consolas', 10, 'bold')).pack(anchor='w', padx=12, pady=(9, 2))
-        return shell
-
     def _field(self, panel, label, value, multiline=False, powershell=False):
         if value is None or value == '':
             return
@@ -164,14 +210,21 @@ class ConversationMixin:
         is_message = kind == 'message'
         user = is_message and entry.get('role') == 'user'
         bg = '#28313b' if user else self.PANEL if is_message else '#25282d'
+        nested = id(entry) in self._index.prompt_for
         holder = tk.Frame(self._new_row(), bg=self.BG)
-        holder.pack(fill='x', padx=(72, 16) if user else (16, 72) if is_message else (16, 16), pady=7)
-        card = tk.Frame(holder, bg=bg, highlightthickness=1, highlightbackground=self.BORDER)
-        card.pack(fill='x')
+        holder.pack(fill='x', padx=(16, 16), pady=(8 if user else 0, 0))
+        if nested:
+            guide = tk.Frame(holder, bg=self.BG, width=24)
+            guide.pack(side='left', fill='y')
+            guide_color = '#566677'
+            tk.Frame(guide, bg=guide_color).place(x=10, y=0, width=2, relheight=1)
+            tk.Frame(guide, bg=guide_color).place(x=11, y=17, width=13, height=2)
+        card = tk.Frame(holder, bg=bg, highlightthickness=int(user), highlightbackground=self.BORDER)
+        card.pack(fill='x', expand=True, pady=(0 if user else 3, 0))
         header = tk.Frame(card, bg=bg)
         header.pack(fill='x', padx=13, pady=(10, 2))
         if is_message:
-            label = 'YOU' if user else self.parser.name.upper() + (' · ' + entry['phase'] if entry.get('phase') else '')
+            label = 'USER' if user else self.parser.name.upper() + (' · ' + entry['phase'] if entry.get('phase') else '')
         else:
             activity_labels = {
                 'CommandExecution': 'EXECUTION · COMMAND',
@@ -188,25 +241,34 @@ class ConversationMixin:
                     ('Consolas', 10, 'bold')).pack(side='left')
         meta = f'#{entry["ordinal"]}  ·  {entry.get("timestamp", "")[:19].replace("T", " ")} UTC'
         self._label(header, meta, self.DIM, ('Consolas', 8)).pack(side='right')
+        key = id(entry)
+        count = self._index.response_counts.get(key, 0)
+        if user and 'permissions' in entry:
+            self._label(card, 'Permissions: ' + entry['permissions'], self.DIM, ('Consolas', 9),
+                        anchor='w', justify='left', wraplength=max(300, self.canvas.winfo_width() - 100)
+                        ).pack(fill='x', padx=13, pady=(2, 4))
         if is_message:
             self._body(card, entry.get('text', ''), bg)
             self._file_links(card, entry.get('file_refs', []), entry.get('attachments', []))
         else:
-            self._render_activity(card, entry)
-        self._bind_conversation_wheel_tree(holder)
+            self._render_activity_fields(card, entry)
+        if user and count:
+            def caption():
+                marker = '▸' if key in self._collapsed_prompts else '▾'
+                noun = 'response' if count == 1 else 'responses'
+                return f'{marker}  {count} {noun}'
 
-    def _render_activity(self, card, entry):
-        headings = {
-            'CommandExecution': 'COMMAND DETAILS',
-            'FileChange': 'FILE CHANGE DETAILS',
-            'McpToolCall': 'MCP TOOL DETAILS',
-            'DynamicToolCall': 'DYNAMIC TOOL DETAILS',
-            'CollabAgentToolCall': 'COLLAB AGENT DETAILS',
-        }
-        panel = self._inner_panel(
-            card, headings.get(entry.get('activity_type'), 'ACTIVITY DETAILS')
-        )
-        self._render_activity_fields(panel, entry)
+            def toggle():
+                if key in self._collapsed_prompts:
+                    self._collapsed_prompts.remove(key)
+                else:
+                    self._collapsed_prompts.add(key)
+                button.configure(text=caption())
+                self._render(keep_position=True)
+
+            button = ttk.Button(card, text=caption(), command=toggle, style='Disclosure.TButton')
+            button.pack(anchor='w', padx=8, pady=(0, 4))
+        self._bind_conversation_wheel_tree(holder)
 
     def _render_activity_fields(self, panel, activity):
         kind = activity['activity_type']

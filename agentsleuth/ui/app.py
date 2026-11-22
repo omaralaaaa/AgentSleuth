@@ -39,11 +39,14 @@ class App(LayoutMixin, ControllerMixin, ConversationMixin, tk.Tk):
         self._photos = []
         self._working = False
         self._render_timer = None
+        self._row_cache = {}
         self._style()
         self._build()
         self._poll_timer = self.after(100, self._poll)
 
     def destroy(self):
+        if self._search_timer is not None:
+            self.after_cancel(self._search_timer)
         if self._layout_timer is not None:
             self.after_cancel(self._layout_timer)
         if self._render_timer is not None:

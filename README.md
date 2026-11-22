@@ -52,6 +52,7 @@ python -m unittest discover -s tests -v
 
 - Loading `state_5.sqlite` only lists conversations; no rollout is parsed automatically.
 - A rollout is parsed only after the user selects a conversation; parsed results are cached for the current output folder.
+- Each user prompt shows permission metadata from its rollout turn context. Missing turn permissions are labeled “Not recorded.” The SQLite thread summary is never substituted for a prompt's permissions.
 - Mouse-wheel scrolling works anywhere over the conversation pane, including message cards and nested text widgets.
 - Message bodies and tool outputs render in full; text wraps to the card width, measures its actual display-line count after layout, and the outer conversation pane handles scrolling (no per-message row cap or horizontal text scrollbar).
 - Tool-call and tool-output records are parsed and correlated internally using `call_id`, turn boundaries, ordinal ranges and command matching, but are not rendered as separate cards. This avoids duplicate content and reduces UI rendering cost.

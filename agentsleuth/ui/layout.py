@@ -2,6 +2,7 @@
 
 import tkinter as tk
 from tkinter import ttk
+from ..core.search import ENTRY_TYPES
 
 
 
@@ -17,6 +18,8 @@ class LayoutMixin:
                       lightcolor=self.BORDER, darkcolor=self.BG, arrowcolor=self.ACCENT,
                       font=('Consolas', 10))
         sty.configure('TButton', padding=(10, 5), relief='raised')
+        sty.configure('Disclosure.TButton', background='#28313b', foreground=self.ACCENT,
+                      padding=(5, 3), relief='flat', borderwidth=0, anchor='w')
         sty.map('TButton', background=[('pressed', self.BORDER), ('active', '#343a42')],
                 foreground=[('disabled', self.DIM), ('active', self.FG)])
         sty.configure('Accent.TButton', background=self.ACCENT, foreground=self.BG)
@@ -120,9 +123,6 @@ class LayoutMixin:
         self.thread_title = self._label(header, 'Select a conversation', self.FG,
                                         ('Consolas', 15, 'bold'), anchor='w', justify='left', wraplength=840)
         self.thread_title.pack(fill='x')
-        self.thread_permissions = self._label(header, '', self.ACCENT, ('Consolas', 10),
-                                             anchor='w', justify='left', wraplength=840)
-        self.thread_permissions.pack(fill='x', pady=(4, 0))
         self.thread_cwd = self._label(header, '', self.DIM, ('Consolas', 9),
                                       anchor='w', justify='left', wraplength=840)
         self.thread_cwd.pack(fill='x', pady=(2, 0))
@@ -138,6 +138,25 @@ class LayoutMixin:
         self.turn_options.bind('<<ComboboxSelected>>', self._render)
         self.conversation_stats = self._label(nav, '', self.DIM, ('Consolas', 9))
         self.conversation_stats.pack(side='left', padx=(9, 0))
+
+        filters = tk.Frame(right, bg=self.BG, padx=15)
+        filters.pack(fill='x', pady=(0, 5))
+        self._label(filters, 'Search:', self.DIM).pack(side='left', padx=(0, 6))
+        self.query = tk.StringVar()
+        search = ttk.Entry(filters, textvariable=self.query, width=14)
+        search.pack(side='left', fill='x', expand=True)
+        self.entry_type = tk.StringVar(value=ENTRY_TYPES[0])
+        kinds = ttk.Combobox(filters, state='readonly', width=17, values=ENTRY_TYPES,
+                             textvariable=self.entry_type)
+        kinds.pack(side='left', padx=6)
+        def clear_filters():
+            self.entry_type.set(ENTRY_TYPES[0])
+            self.query.set('')
+        ttk.Button(filters, text='Clear', command=clear_filters).pack(side='left')
+        self._search_timer = None
+        self.query.trace_add('write', self._schedule_search)
+        self.entry_type.trace_add('write', self._schedule_search)
+        self.bind('<Control-f>', lambda _: search.focus_set())
 
         container = tk.Frame(right, bg=self.BG)
         container.pack(fill='both', expand=True)
@@ -174,7 +193,7 @@ class LayoutMixin:
         for item, _ in self._rows:
             self.canvas.itemconfigure(item, width=event.width)
         self._schedule_row_layout()
-        for lbl in (self.thread_title, self.thread_permissions, self.thread_cwd, self.thread_rollout):
+        for lbl in (self.thread_title, self.thread_cwd, self.thread_rollout):
             lbl.configure(wraplength=max(420, event.width - 55))
 
     def _bind_conversation_wheel_tree(self, root):

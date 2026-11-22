@@ -59,6 +59,33 @@ class AgentSleuthCoreTests(unittest.TestCase):
         self.assertEqual(threads[0]["name"], "Conversation name from name column")
         self.assertNotEqual(threads[0]["name"], threads[0]["raw"]["title"])
 
+    def test_prompt_permissions_follow_turn_context(self):
+        def prompt(turn, text):
+            return 'response_item', dict(type='message', role='user', turn_id=turn,
+                                         content=[dict(type='input_text', text=text)])
+        records = [
+            prompt('a', 'first'),
+            ('turn_context', dict(turn_id='a', sandbox_policy={'type': 'workspace-write'},
+                                  permission_profile={'type': 'managed', 'network': 'restricted'},
+                                  active_permission_profile={'id': ':workspace'}, approval_policy='on-request')),
+            ('turn_context', dict(turn_id='a', sandbox_policy={'type': 'read-only'})),
+            prompt('a', 'second'),
+            ('event_msg', dict(type='task_started', turn_id='b')),
+            ('turn_context', dict(sandbox_policy={'type': 'danger-full-access'}, approval_policy='never')),
+            prompt('', 'third'),
+            ('event_msg', dict(type='task_complete', turn_id='b')),
+            prompt('c', 'fourth'),
+        ]
+        self.rollout.write_text('\n'.join(json.dumps(dict(type=t, ordinal=i, payload=p))
+                                          for i, (t, p) in enumerate(records)), encoding='utf-8')
+        result = reconstruct_from_thread(self.db, load_threads(self.db)[0], self.root / 'results')
+        labels = {e['text']: e['permissions'] for turn in result['turns'] for e in turn['entries']}
+        self.assertEqual(labels, {
+            'first': ':workspace · workspace-write · Network: restricted · Approval: on-request',
+            'second': 'read-only', 'third': 'danger-full-access · Approval: never',
+            'fourth': 'Not recorded',
+        })
+
     def test_file_markers_become_filename_and_path(self):
         cleaned, refs = extract_file_markers(
             '<image name=[Image #1] path="D:\\mem_lab\\flag_fixed.png"></image>'

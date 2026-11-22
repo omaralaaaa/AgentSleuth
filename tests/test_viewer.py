@@ -11,6 +11,54 @@ from agentsleuth.ui.powershell import insert_command, is_powershell
 
 
 class ViewerTest(unittest.TestCase):
+    def test_prompt_folds_only_its_replies_and_tools(self):
+        try:
+            app = App()
+        except tk.TclError as error:
+            self.skipTest(str(error))
+        self.addCleanup(app.destroy)
+        app.geometry('1000x700+10000+10000')
+        first, reply, second, later = [
+            dict(kind='message', role=role, ordinal=n, text=str(n))
+            for n, role in [(1, 'user'), (2, 'assistant'), (4, 'user'), (5, 'assistant')]
+        ]
+        tool = dict(kind='activity', activity_type='McpToolCall', ordinal=3, item={})
+        app.result = dict(turns=[dict(title='Shared turn', entries=[first, reply, tool, second, later])],
+                          summary=dict(turns=1, activities=1, attachments=0, recovered_files=0,
+                                       max_ordinal=5), output_directory='.')
+        app._after_reconstruct()
+        app.update()
+        def button_under(widget):
+            if widget.winfo_class() == 'TButton':
+                return widget
+            for child in widget.winfo_children():
+                button = button_under(child)
+                if button is not None:
+                    return button
+        button = button_under(app._row_cache[id(first)][1])
+        button.invoke()
+        def visible(entry):
+            return app._row_cache[id(entry)] in app._rows
+        self.assertEqual([visible(e) for e in (first, reply, tool, second, later)],
+                         [True, False, False, True, True])
+        app.entry_type.set('Tool calls')
+        app._render()
+        self.assertTrue(visible(first))
+        self.assertFalse(visible(tool))
+        button.invoke()
+        self.assertTrue(visible(tool))
+        self.assertTrue(visible(first))
+        self.assertFalse(visible(second))
+        app.update()
+        def card_left(entry):
+            row = app._row_cache[id(entry)][1]
+            holder = row.winfo_children()[0]
+            return holder.winfo_children()[-1].winfo_x()
+        self.assertGreater(card_left(tool), card_left(first))
+        app.entry_type.set('All entries')
+        app._render()
+        self.assertTrue(all(visible(e) for e in (first, reply, tool, second, later)))
+
     def test_powershell_highlighting_preserves_command_text(self):
         command = "Get-Item -Path $target | Select-Object 'Name' # café"
         self.assertTrue(is_powershell([r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
@@ -92,7 +140,7 @@ class ViewerTest(unittest.TestCase):
                 yield from widgets(child)
 
         def bodies():
-            return [w for w in widgets(app.canvas) if isinstance(w, tk.Text)]
+            return [w for _, row in app._rows for w in widgets(row) if isinstance(w, tk.Text)]
 
         def finish_render():
             deadline = time.monotonic() + 10
@@ -124,6 +172,24 @@ class ViewerTest(unittest.TestCase):
         first.yview_moveto(1)
         first.event_generate('<MouseWheel>', delta=-120)
         self.assertGreater(app.canvas.yview()[0], outer[0])
+        last_body = bodies()[-1]
+        app.query.set('SHORT last')
+        def settle_filters():
+            deadline = time.monotonic() + 2
+            while app._search_timer is not None and time.monotonic() < deadline:
+                app.update()
+                time.sleep(.01)
+            finish_render()
+        settle_filters()
+        self.assertEqual(bodies(), [last_body])
+        app.entry_type.set('Commands')
+        settle_filters()
+        self.assertEqual(bodies(), [])
+        self.assertIn('0 matching', app.status.get())
+        app.entry_type.set('All entries')
+        app.query.set('')
+        settle_filters()
+        self.assertEqual(bodies()[0], first)
         app.turn_options.current(4)
         app._render()
         finish_render()
