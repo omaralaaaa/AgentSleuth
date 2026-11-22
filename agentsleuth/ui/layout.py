@@ -63,7 +63,8 @@ class LayoutMixin:
         split.add(left, minsize=205, width=325)
         self._label(left, 'CONVERSATIONS', self.FG, ('Segoe UI', 11, 'bold')).pack(anchor='w', pady=(0, 9))
         ttk.Entry(left, textvariable=self.filter_text).pack(fill='x', pady=(0, 8))
-        self.filter_text.trace_add('write', lambda *_: self._populate_threads())
+        self._filter_timer = None
+        self.filter_text.trace_add('write', self._schedule_filter)
         sidebar_wrap = tk.Frame(left, bg=self.PANEL)
         sidebar_wrap.pack(fill='both', expand=True)
         sidebar_wrap.grid_rowconfigure(0, weight=1)
@@ -137,6 +138,14 @@ class LayoutMixin:
         self.bind_class(self._conversation_wheel_tag, '<Button-4>', lambda e: self._on_conversation_wheel(e, -1))
         self.bind_class(self._conversation_wheel_tag, '<Button-5>', lambda e: self._on_conversation_wheel(e, 1))
         self._bind_conversation_wheel_tree(right)
+
+    def _schedule_filter(self, *_):
+        if self._filter_timer is not None:
+            self.after_cancel(self._filter_timer)
+        def apply_filter():
+            self._filter_timer = None
+            self._populate_threads()
+        self._filter_timer = self.after(150, apply_filter)
 
     def _resize(self, event):
         self.canvas.itemconfigure(self.window_id, width=event.width)

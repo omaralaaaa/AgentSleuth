@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 
@@ -52,7 +53,7 @@ def load_threads(db_path: Path):
     db_path = db_path.expanduser().resolve()
     if not db_path.is_file():
         raise FileNotFoundError(f'SQLite database does not exist: {db_path}')
-    with _sqlite_ro(db_path) as con:
+    with closing(_sqlite_ro(db_path)) as con:
         names = [r['name'] for r in con.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")]
         threads_table = next((t for t in names if t.lower() == 'threads'), None)

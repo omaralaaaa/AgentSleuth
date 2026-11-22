@@ -1,6 +1,7 @@
 """Render reconstructed messages and correlated execution/activity cards."""
 
 import json
+from bisect import bisect_right
 import ntpath
 import os
 import subprocess
@@ -17,22 +18,40 @@ from ..utils import safe_text
 
 
 class ConversationMixin:
-    def _render(self, _event=None):
+    PAGE_SIZE = 20
+
+    def _render(self, _event=None, *, page=0):
         self._clear_chat()
         if not self.result:
             return
         selection = self.turn_options.current()
-        turns = self.result['turns'] if selection <= 0 else [self.result['turns'][selection - 1]]
-        if not turns:
+        turns = self.result['turns']
+        base = self._turn_ends[selection - 2] if selection > 1 else 0
+        end = self._turn_ends[selection - 1 if selection > 0 else -1] if turns else 0
+        if end == base:
             self._section('No selected events found in this rollout.')
             return
 
-        expected_entries = sum(len(turn.get('entries', [])) for turn in turns)
+        start = base + page * self.PAGE_SIZE
+        stop = min(start + self.PAGE_SIZE, end)
+        if end - base > self.PAGE_SIZE:
+            nav = ttk.Frame(self.chat_frame)
+            nav.pack(fill='x', padx=16, pady=6)
+            for title, target, enabled in [('Previous', page - 1, start > base),
+                                            ('Next', page + 1, stop < end)]:
+                ttk.Button(nav, text=title, state='normal' if enabled else 'disabled',
+                           command=lambda p=target: self._render(page=p)).pack(side='left')
+            ttk.Label(nav, text=f'Entries {start-base+1}–{stop-base} of {end-base}').pack(side='left')
+        expected_entries = stop - start
         rendered_entries = 0
         render_errors = []
-        for turn in turns:
+        for index in range(bisect_right(self._turn_ends, start), len(turns)):
+            turn = turns[index]
+            offset = self._turn_ends[index - 1] if index else 0
+            if offset >= stop:
+                break
             self._section('Turn · ' + turn['title'])
-            for entry in turn.get('entries', []):
+            for entry in turn['entries'][max(0, start-offset):stop-offset]:
                 try:
                     self._render_entry(entry)
                     rendered_entries += 1
@@ -43,7 +62,6 @@ class ConversationMixin:
                     render_errors.append((ordinal, str(exc)))
                     self._render_error_entry(ordinal, exc)
 
-        self.update_idletasks()
         self._refresh_conversation_scrollregion()
         self._bind_conversation_wheel_tree(self.conversation_pane)
         self.canvas.yview_moveto(0)
@@ -53,7 +71,7 @@ class ConversationMixin:
                 f'{len(render_errors)} item(s) shown with rendering errors'
             )
         else:
-            self.status.set(f'Rendered all {rendered_entries} conversation entries')
+            self.status.set(f'Showing entries {start-base+1}–{stop-base} of {end-base}')
 
     def _render_error_entry(self, ordinal, error):
         holder = tk.Frame(self.chat_frame, bg=self.BG)
@@ -91,7 +109,9 @@ class ConversationMixin:
                       font=('Consolas', 10) if monospace else ('Segoe UI', 10),
                       padx=2, pady=2, relief='flat',
                       spacing1=1, spacing3=1)
-        txt.insert('1.0', value)
+        preview = value[:2400]
+        preview = '\n'.join(preview.split('\n')[:16])
+        txt.insert('1.0', preview)
         txt.configure(state='disabled')
         txt.pack(fill='x', expand=True)
 
@@ -113,9 +133,8 @@ class ConversationMixin:
                     if not txt.winfo_exists():
                         return
                     measured = txt.count('1.0', 'end-1c', 'displaylines')
-                    display_lines = int(measured[0]) if measured else 1
-                    txt.configure(height=max(1, display_lines))
-                    self._refresh_conversation_scrollregion()
+                    # count returns display-line transitions, excluding the final row.
+                    txt.configure(height=1 + (int(measured[0]) if measured else 0))
                 except (tk.TclError, TypeError, ValueError):
                     # Keep the complete text available even if a platform's Tk
                     # build does not support display-line counting.
@@ -125,6 +144,16 @@ class ConversationMixin:
 
         txt.bind('<Configure>', fit_to_content, add='+')
         self.after_idle(fit_to_content)
+        if len(preview) < len(value):
+            def expand():
+                txt.configure(state='normal')
+                txt.insert('end-1c', value[len(preview):])
+                txt.configure(state='disabled')
+                button.destroy()
+                last_width['value'] = 0
+                fit_to_content()
+            button = ttk.Button(holder, text='Show full text', command=expand)
+            button.pack(anchor='w')
         return txt
 
     def _inner_panel(self, parent, heading, bg='#203047'):

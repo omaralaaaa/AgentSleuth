@@ -179,6 +179,11 @@ class ControllerMixin:
         if not self.result:
             return
         turns = self.result['turns']
+        self._turn_ends = []
+        total = 0
+        for turn in turns:
+            total += len(turn['entries'])
+            self._turn_ends.append(total)
         self.turn_options.configure(values=['Entire conversation'] +
                                     [f'{i + 1:02d} · {short(t["title"], 75)}' for i, t in enumerate(turns)])
         self.turn_options.current(0)
@@ -198,5 +203,3 @@ class ControllerMixin:
     def _section(self, label):
         self._label(self.chat_frame, label, '#87a5ca', ('Segoe UI', 10, 'bold'),
                     anchor='w', justify='left', wraplength=750).pack(fill='x', padx=18, pady=(18, 4))
-        if hasattr(self, 'conversation_pane'):
-            self._bind_conversation_wheel_tree(self.conversation_pane)

@@ -229,9 +229,13 @@ def correlate(calls, outputs, activities):
 
     # Avoid crediting the same activity to overlapping calls. Strong exact
     # command matches are preferred to generic interval matches.
+    calls_by_turn = {}
+    for call in calls:
+        if call["turn_id"] and call["output"]:
+            calls_by_turn.setdefault(call["turn_id"], []).append(call)
     for activity in activities:
         candidates = []
-        for call in calls:
+        for call in calls_by_turn.get(activity["turn_id"], ()):
             end = call["output"]["ordinal"] if call["output"] else None
             if not call["turn_id"] or call["turn_id"] != activity["turn_id"]:
                 continue
