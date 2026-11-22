@@ -11,6 +11,7 @@ from tkinter import messagebox, ttk
 
 from ..core.paths import _path_from_stored
 from ..core.utils import safe_text
+from .powershell import insert_command, is_powershell
 
 
 
@@ -97,7 +98,7 @@ class ConversationMixin:
         if at_bottom:
             self.canvas.yview_moveto(1)
 
-    def _body(self, parent, content, bg, max_rows=12, monospace=False):
+    def _body(self, parent, content, bg, max_rows=12, monospace=False, powershell=False):
         """Fit short bodies to their wrapped text and scroll long bodies in place."""
         holder = tk.Frame(parent, bg=bg)
         holder.pack(fill='x', padx=13, pady=(3, 10))
@@ -108,7 +109,10 @@ class ConversationMixin:
         scroll = ttk.Scrollbar(holder, orient='vertical', command=txt.yview)
         txt.configure(yscrollcommand=scroll.set)
         value = safe_text(content)
-        txt.insert('1.0', value)
+        if powershell:
+            insert_command(txt, value)
+        else:
+            txt.insert('1.0', value)
         logical_rows = value.count('\n') + 1
         txt.configure(state='disabled', height=min(logical_rows, max_rows))
         txt.pack(side='left', fill='x', expand=True)
@@ -140,7 +144,7 @@ class ConversationMixin:
         self._label(shell, heading, self.ACCENT, ('Consolas', 10, 'bold')).pack(anchor='w', padx=12, pady=(9, 2))
         return shell
 
-    def _field(self, panel, label, value, multiline=False):
+    def _field(self, panel, label, value, multiline=False, powershell=False):
         if value is None or value == '':
             return
         if not multiline:
@@ -153,7 +157,7 @@ class ConversationMixin:
             return
         self._label(panel, label, self.DIM, ('Consolas', 9, 'bold')).pack(
             anchor='w', padx=13, pady=(7, 1))
-        self._body(panel, value, panel.cget('bg'), max_rows=9, monospace=True)
+        self._body(panel, value, panel.cget('bg'), max_rows=9, monospace=True, powershell=powershell)
 
     def _render_entry(self, entry):
         kind = entry['kind']
@@ -211,7 +215,10 @@ class ConversationMixin:
             self._field(panel, 'Process ID', activity.get('pid'))
             self._field(panel, 'Working directory', activity.get('cwd'))
             self._field(panel, 'Exit code', activity.get('exit_code'))
-            self._field(panel, 'Shell command', activity.get('command'), multiline=True)
+            command = activity.get('command')
+            argv = (activity.get('item') or {}).get('command')
+            self._field(panel, 'Shell command', command, multiline=True,
+                        powershell=is_powershell(argv, safe_text(command)))
             output = activity.get('item', {}).get('aggregated_output')
             if output:
                 self._field(panel, 'Command stdout/stderr (aggregated)', output, multiline=True)

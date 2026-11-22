@@ -7,9 +7,29 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agentsleuth.ui.app import App
+from agentsleuth.ui.powershell import insert_command, is_powershell
 
 
 class ViewerTest(unittest.TestCase):
+    def test_powershell_highlighting_preserves_command_text(self):
+        command = "Get-Item -Path $target | Select-Object 'Name' # café"
+        self.assertTrue(is_powershell([r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
+                                       '-Command', command], command))
+        self.assertFalse(is_powershell(['bash', '-c', command], command))
+        try:
+            root = tk.Tk()
+        except tk.TclError as error:
+            self.skipTest(str(error))
+        self.addCleanup(root.destroy)
+        root.withdraw()
+        text = tk.Text(root)
+        insert_command(text, command)
+        self.assertEqual(text.get('1.0', 'end-1c'), command)
+        for tag, expected in [('command', ['Get-Item', 'Select-Object']), ('parameter', ['-Path']),
+                              ('variable', ['$target']), ('string', ["'Name'"]), ('comment', ['# café'])]:
+            ranges = iter(text.tag_ranges(tag))
+            self.assertEqual([text.get(start, end) for start, end in zip(ranges, ranges)], expected)
+
     def test_progress_runs_during_provider_load_and_hides_on_completion(self):
         release = threading.Event()
         def load_threads(path):
