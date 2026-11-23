@@ -1,9 +1,7 @@
 """Build a viewer result from a selected OpenCode session."""
 
-import hashlib
-from pathlib import Path
-
 from ...core.artifacts import ArtifactStore
+from ...core.export import ExportSession
 from .attachments import parse_upload
 from .database import read_conversation
 from .reconstruction import reconstruct
@@ -19,8 +17,7 @@ def reconstruct_from_thread(path, thread, output_root=None, progress=None):
     )
     store = None
     if output_root is not None:
-        key = hashlib.sha256(session_id.encode()).hexdigest()[:24]
-        store = ArtifactStore(Path(output_root).expanduser().resolve() / 'OpenCode' / key)
+        store = ArtifactStore(ExportSession.from_thread(output_root, 'OpenCode', thread))
     attachments = []
     failures = []
     parts = {part['id']: part for msg in messages for part in msg['parts'] if part['type'] == 'file'}

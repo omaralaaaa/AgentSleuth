@@ -3,13 +3,65 @@
 import json
 import re
 import sqlite3
+from collections import defaultdict
 from contextlib import closing
 from pathlib import Path
 
+from ...core.export import session_directory
 from ...core.utils import safe_text, short
 
 
 TRANSCRIPT = Path('.system_generated/logs/transcript.jsonl')
+PROMPT_TAG = re.compile(r'<(/?)(USER_REQUEST|ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)'
+                        r'[ \t]*(?:>|(?=\r?$))', re.MULTILINE)
+
+
+def _user_prompt(step):
+    content = step.get('content')
+    for source in (step, content if isinstance(content, dict) else {}):
+        for key in ('user_request', 'userRequest', 'USER_REQUEST'):
+            if isinstance(value := source.get(key), str):
+                return value if value.strip() else ''
+    if not isinstance(content, str):
+        return ''
+
+    tags = list(PROMPT_TAG.finditer(content))
+    openings = defaultdict(list)
+    ends = {}
+    for index, tag in enumerate(tags):
+        closing, name = tag.groups()
+        if not closing:
+            openings[name].append(index)
+        elif openings[name]:
+            ends[openings[name].pop()] = index
+
+    requests, outside = [], []
+    index = cursor = 0
+    while index < len(tags):
+        tag = tags[index]
+        closing, name = tag.groups()
+        outside.append(content[cursor:tag.start()])
+        cursor = tag.end()
+        end = ends.get(index)
+        index += 1
+        if closing:
+            continue
+        # A complete wrapper can contain literal tags written by the user.
+        # An incomplete wrapper ends at the next known marker or at EOF.
+        boundary = end if end is not None else index
+        stop = tags[boundary].start() if boundary < len(tags) else len(content)
+        if name == 'USER_REQUEST':
+            requests.append(re.sub(r'^\r?\n|\r?\n\Z', '', content[cursor:stop]))
+        if end is not None:
+            cursor, index = tags[end].end(), end + 1
+        else:
+            cursor = stop
+
+    if requests:
+        return '\n\n'.join(dict.fromkeys(text for text in requests if text.strip()))
+    outside.append(content[cursor:])
+    text = ''.join(outside)
+    return text if text.strip() else ''
 
 
 def _connect(path):
@@ -46,13 +98,13 @@ def load_threads(path):
                 source = _related(path, sid, path)
                 if source != path:
                     ids.add(sid)
-                    threads.append(dict(id=sid, name=sid, cwd='', source_detail=str(source)))
+                    threads.append(dict(id=sid, name=sid, export_title='', cwd='', source_detail=str(source)))
         if not threads:
             raise ValueError('No generated transcripts or supported trajectory databases in this folder.')
         return sorted(threads, key=lambda t: t['id'])
     if path.suffix.lower() == '.jsonl':
         sid = path.parents[2].name if path.as_posix().endswith('/' + TRANSCRIPT.as_posix()) else path.stem
-        return [dict(id=sid, name=sid, cwd='', source_detail=str(path))]
+        return [dict(id=sid, name=sid, export_title='', cwd='', source_detail=str(path))]
     with closing(_connect(path)) as db:
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if 'conversation_summaries' in tables:
@@ -67,11 +119,11 @@ def load_threads(path):
                 except (TypeError, ValueError):
                     roots = None
                 cwd = ', '.join(x for x in roots if isinstance(x, str)) if isinstance(roots, list) else ''
-                threads.append(dict(id=sid, name=row['title'] or sid, cwd=cwd,
+                threads.append(dict(id=sid, name=row['title'] or sid, export_title=row['title'], cwd=cwd,
                                     source_detail=f'Antigravity session {sid}', indexed=True))
             return threads
         if 'steps' in tables:
-            return [dict(id=path.stem, name=path.stem, cwd='', source_detail=str(path))]
+            return [dict(id=path.stem, name=path.stem, export_title='', cwd='', source_detail=str(path))]
     raise ValueError('Expected an Antigravity summary index or trajectory database.')
 
 
@@ -113,7 +165,7 @@ def reconstruct_from_thread(path, thread, output_root=None, progress=None):
         source = _related(path.parent, thread['id'], path)
     elif path.parent.name == 'conversations' and path.suffix.lower() == '.db':
         source = _related(path.parent.parent, thread['id'], path)
-    turns = []
+    turns, user_records = [], []
     ordinal = activities = tool_calls = messages = 0
     indexed_only = thread.get('indexed') and source == path
     records = () if indexed_only else _records(source)
@@ -121,17 +173,21 @@ def reconstruct_from_thread(path, thread, output_root=None, progress=None):
         if progress and n % 200 == 0:
             progress(f'Reading Antigravity evidence · {n:,} steps')
         kind = step['type']
-        content = safe_text(step.get('content'))
+        if kind == 'USER_INPUT':
+            user_records.append(step)
+            content = _user_prompt(step)
+        else:
+            content = safe_text(step.get('content'))
         base = dict(agent='antigravity', timestamp_label=safe_text(step.get('created_at')),
                     timestamp=safe_text(step.get('created_at')), step_index=step.get('step_index'),
                     status=step.get('status'), truncated_fields=step.get('truncated_fields'))
         entries = []
-        if kind == 'USER_INPUT' and (wrapped := _USER_REQUEST.match(content)):
-            base['raw_content'] = content
-            content = wrapped['request']
-        if kind in ('USER_INPUT', 'PLANNER_RESPONSE') and (content or 'raw_content' in base):
-            entries.append(dict(base, kind='message', role='user' if kind == 'USER_INPUT' else 'assistant',
-                                text=content))
+        if kind in ('USER_INPUT', 'PLANNER_RESPONSE') and content:
+            entry = dict(base, kind='message', role='user' if kind == 'USER_INPUT' else 'assistant',
+                         text=content)
+            if kind == 'USER_INPUT':
+                entry['raw'] = step
+            entries.append(entry)
             messages += 1
         for call in step.get('tool_calls') or []:
             if isinstance(call, dict):
@@ -139,7 +195,7 @@ def reconstruct_from_thread(path, thread, output_root=None, progress=None):
                                     part_type='Tool request', tool_name=call.get('name'), text=safe_text(call),
                                     evidence=safe_text(call)))
                 tool_calls += 1
-        if not entries:
+        if not entries and kind != 'USER_INPUT':
             # Preserve unfamiliar step kinds and recorded errors; never infer a
             # tool result from proximity to a planner request.
             evidence = content or safe_text(step.get('thinking')) or kind
@@ -160,6 +216,12 @@ def reconstruct_from_thread(path, thread, output_root=None, progress=None):
         detail = 'Summary only · no generated transcript or readable trajectory database beside this index'
     elif source.suffix.lower() == '.db':
         detail += ' · step metadata only (binary payloads are not decoded)'
-    return dict(thread=thread, turns=turns, source_path=str(source), source_detail=detail,
+    directory = None
+    if output_root is not None:
+        title = thread.get('export_title', thread.get('name'))
+        directory = session_directory(output_root, 'Antigravity', thread['id'], title)
+    return dict(thread=thread, turns=turns, user_records=user_records,
+                output_directory=str(directory) if directory else None,
+                source_path=str(source), source_detail=detail,
                 summary=dict(turns=len(turns), activities=activities, messages=messages,
                              tool_calls=tool_calls, max_ordinal=ordinal, attachments=0, recovered_files=0))

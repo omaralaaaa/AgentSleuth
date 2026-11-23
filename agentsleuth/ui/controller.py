@@ -18,16 +18,21 @@ class ControllerMixin:
             self._load()
 
     def _browse_output(self):
-        path = filedialog.askdirectory(parent=self, title='Choose extracted-files directory',
+        path = filedialog.askdirectory(parent=self, title='Choose export directory',
                                        initialdir=self.output_root.get())
         if path:
-            self.output_root.set(path)
-            self.cache.clear()
-            self._active_cache_key = None
-            self.result = None
-            self.current_thread_idx = None
-            if self.conversations.selection():
-                self._select_thread()
+            try:
+                warning = self.winfo_toplevel()._set_export_root(path)
+            except (OSError, RuntimeError, ValueError) as error:
+                self.status.set(f'Could not set export directory · {error}')
+            else:
+                if warning:
+                    self.status.set(warning)
+
+    def _export_root_changed(self):
+        self.cache.clear()
+        if not self._loading and self.current_thread_idx is not None:
+            self._open_thread(self.current_thread_idx)
 
     def _set_busy(self, busy):
         self._working = busy
@@ -109,8 +114,16 @@ class ControllerMixin:
             return
         if thread_index < 0 or thread_index >= len(self.threads):
             return
+        self._open_thread(thread_index)
+
+    def _open_thread(self, thread_index):
         thread = self.threads[thread_index]
-        output_root = Path(self.output_root.get()) if self.output_root is not None else None
+        output_root = None
+        if self.output_root is not None:
+            if not self.output_root.get():
+                self.status.set('Choose an export directory before opening a conversation.')
+                return
+            output_root = Path(self.output_root.get())
         cache_key = (self._loaded_db, thread['id'], output_root)
         if (self.current_thread_idx == thread_index and (self.result is not None or self._working)
                 and self._active_cache_key == cache_key):

@@ -50,7 +50,8 @@ def load_threads(path):
         created = recorded_times[0] if recorded_times else None
         updated = recorded_times[-1] if recorded_times else None
         cwd = projects_seen[0] if projects_seen else ''
-        sessions.append({'id': session_id, 'name': short(title, 100) or 'Untitled Claude Session',
+        title = short(title, 100)
+        sessions.append({'id': session_id, 'name': title or 'Untitled Claude Session', 'export_title': title,
                          'cwd': cwd, 'projects': projects_seen, 'history': history,
                          'time_created': created, 'created_label': timestamp_label(created),
                          'time_updated': updated, 'updated_label': timestamp_label(updated),

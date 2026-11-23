@@ -6,13 +6,14 @@ import hashlib
 import mimetypes
 import ntpath
 import re
-from pathlib import Path
 
 from .config import (
     MAX_ATTACHMENT_BYTES, MAX_TOTAL_ATTACHMENT_BYTES, DATA_URI,
     BASE64_FIELD_NAMES, IMAGE_EXT, AUDIO_EXT, SPECIAL_EXT,
     FILE_MARKER_RE, FILE_PATH_RE, FILE_NAME_RE,
 )
+from ...core.artifacts import write_session_artifact
+from ...core.export import ExportSession
 from ...core.utils import safe_text
 from .metadata import get_turn
 
@@ -20,8 +21,11 @@ from .metadata import get_turn
 class AttachmentExtractor:
     """Only extracts explicit data URIs and known base64 attachment fields."""
 
-    def __init__(self, directory: Path):
-        self.directory = directory
+    def __init__(self, destination):
+        if isinstance(destination, ExportSession):
+            self.destination, self.category = destination, 'attachments'
+        else:
+            self.destination, self.category = destination.parent, destination.name
         self.entries = []
         self.failures = []
         self.bytes_written = 0
@@ -60,21 +64,18 @@ class AttachmentExtractor:
             return {"_embedded_attachment": {**marker, "status": "error", "reason": error}}
         extension = self._extension(mime)
         filename = f"attachment_{entry_id:04d}{extension}"
-        self.directory.mkdir(parents=True, exist_ok=True)
-        file_path = self.directory / filename
-        # Avoid silently replacing files from an earlier analysis.
-        if file_path.exists() and hashlib.sha256(file_path.read_bytes()).digest() != hashlib.sha256(blob).digest():
-            filename = f"attachment_{entry_id:04d}_{hashlib.sha256(blob).hexdigest()[:10]}{extension}"
-            file_path = self.directory / filename
-        if not file_path.exists():
-            file_path.write_bytes(blob)
+        digest = hashlib.sha256(blob).hexdigest()
+        file_path = write_session_artifact(
+            self.destination, self.category, filename, blob,
+            alternate_name=f"attachment_{entry_id:04d}_{digest[:10]}{extension}",
+        )
         self.bytes_written += len(blob)
         result = {
             **marker,
             "status": "extracted",
-            "filename": filename,
+            "filename": file_path.name,
             "size_bytes": len(blob),
-            "sha256": hashlib.sha256(blob).hexdigest(),
+            "sha256": digest,
             "ordinal": record.get("ordinal"),
             "turn_id": get_turn(record),
             "record_type": record.get("type"),

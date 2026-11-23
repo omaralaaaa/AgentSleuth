@@ -2,13 +2,13 @@
 
 import hashlib
 import ntpath
-from pathlib import Path
 
 from .config import MAX_ATTACHMENT_BYTES
 from .paths import _safe_component
+from ...core.artifacts import write_session_artifact
 
 
-def _recover_file_changes(activities, extracted_dir: Path):
+def _recover_file_changes(activities, destination):
     """Recover text content recorded in FileChange, without executing it."""
     recovered = []
     for activity in activities:
@@ -28,20 +28,18 @@ def _recover_file_changes(activities, extracted_dir: Path):
             if operation not in {'add', 'create', 'rewrite'}:
                 name += '.logged-change.txt'
             token = hashlib.sha256((original + '\0' + str(activity['ordinal'])).encode()).hexdigest()[:10]
-            new_path = extracted_dir / 'recovered_files' / f'{token}_{name}'
-            new_path.parent.mkdir(parents=True, exist_ok=True)
             blob = content.encode('utf-8')
             if len(blob) > MAX_ATTACHMENT_BYTES:
                 continue
-            if new_path.exists():
-                if new_path.read_bytes() != blob:
-                    new_path = new_path.with_name(f'{token}_{hashlib.sha256(blob).hexdigest()[:8]}_{name}')
-            if not new_path.exists():
-                new_path.write_bytes(blob)
+            digest = hashlib.sha256(blob).hexdigest()
+            new_path = write_session_artifact(
+                destination, 'recovered_files', f'{token}_{name}', blob,
+                alternate_name=f'{token}_{digest[:8]}_{name}',
+            )
             recovered.append({
                 'original_path': original, 'saved_path': str(new_path),
                 'operation': operation, 'size_bytes': len(blob),
-                'sha256': hashlib.sha256(blob).hexdigest(), 'ordinal': activity['ordinal'],
+                'sha256': digest, 'ordinal': activity['ordinal'],
                 'note': 'Rebuilt from logged text; bytes on original disk are not verified.'
             })
     return recovered

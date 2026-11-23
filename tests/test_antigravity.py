@@ -1,36 +1,112 @@
 import json
 import sqlite3
 import tempfile
+import time
+import tkinter as tk
 import unittest
 from contextlib import closing
 from pathlib import Path
 
 from agentsleuth.parsers import antigravity as provider
+from agentsleuth.ui.app import App
 
 
 class AntigravityTests(unittest.TestCase):
-    def test_user_request_is_displayed_without_generated_metadata(self):
-        prompt = 'Read C:\\case\\notes\n  Keep <tags> and indentation.'
-        plain = '<USER_REQUEST>\n' + prompt + '\n</USER_REQUEST>'
-        metadata = '<ADDITIONAL_METADATA>\nRecorded time\n</ADDITIONAL_METADATA>'
-        settings = '<USER_SETTINGS_CHANGE>\nRecorded setting\n</USER_SETTINGS_CHANGE>'
-        wrapped = '\n'.join((plain, metadata, settings))
-        escaped = '\\<USER_REQUEST>\\\n' + prompt + '\\\n\\</USER_REQUEST>\\\n\\' + metadata
-        cases = [('USER_INPUT', wrapped, prompt), ('USER_INPUT', escaped, prompt),
-                 ('USER_INPUT', prompt, prompt), ('PLANNER_RESPONSE', wrapped, wrapped),
-                 ('USER_INPUT', '<USER_REQUEST>incomplete', '<USER_REQUEST>incomplete')]
+    def _reconstruct(self, records):
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'transcript.jsonl'
-            for kind, original, expected in cases:
-                with self.subTest(kind=kind, original=original):
-                    path.write_text(json.dumps(dict(type=kind, content=original)), encoding='utf-8')
-                    result = provider.reconstruct_from_thread(path, provider.load_threads(path)[0])
-                    turn = result['turns'][0]
-                    entry = turn['entries'][0]
-                    self.assertEqual(entry['text'], expected)
-                    if expected != original:
-                        self.assertEqual(entry['raw_content'], original)
-                        self.assertNotIn('USER_REQUEST', turn['title'])
+            transcript = Path(tmp) / 'transcript.jsonl'
+            transcript.write_text('\n'.join(map(json.dumps, records)), encoding='utf-8')
+            before = transcript.read_bytes()
+            result = provider.reconstruct_from_thread(transcript, provider.load_threads(transcript)[0])
+            self.assertEqual(transcript.read_bytes(), before)
+            return result
+
+    def test_user_request_extracts_only_authored_text_and_keeps_evidence(self):
+        text = '  Inspect the report.  \r\n\r\n\tExplain the summary.\r\n'
+        step = dict(type='USER_INPUT', step_index=0, created_at='2026-08-15T07:36:05+03:00',
+                    truncated_fields=['content'], source='recorded source', content=(
+                        f'Internal preface\r\n<USER_REQUEST>\r\n{text}\r\n</USER_REQUEST>\r\n'
+                        '<ADDITIONAL_METADATA>Internal timestamp</ADDITIONAL_METADATA>\n'
+                        '<USER_SETTINGS_CHANGE>Model changed</USER_SETTINGS_CHANGE>\n'
+                        '<INTERNAL_INSTRUCTION>Internal suffix</INTERNAL_INSTRUCTION>'
+                    ))
+        result = self._reconstruct([step])
+        entry, = result['turns'][0]['entries']
+        self.assertEqual(entry['role'], 'user')
+        self.assertEqual(entry['text'], text)
+        self.assertEqual(entry['step_index'], 0)
+        self.assertEqual(entry['timestamp'], step['created_at'])
+        self.assertEqual(entry['raw'], step)
+        self.assertEqual(result['user_records'], [step])
+
+    def test_structured_plain_multiple_and_malformed_requests(self):
+        literal = '<ADDITIONAL_METADATA>part of an example</ADDITIONAL_METADATA>\n' \
+                  '<USER_REQUEST>also part of the example</USER_REQUEST>'
+        samples = [
+            ({'content': {'userRequest': f'Explain this XML\n{literal}', 'timestamp': 'internal'}},
+             f'Explain this XML\n{literal}'),
+            ({'content': '  Plain prompt\n\n  indented line  '}, '  Plain prompt\n\n  indented line  '),
+            ({'content': f'<USER_REQUEST>\n{literal}\n</USER_REQUEST>'}, literal),
+            ({'content': '<ADDITIONAL_METADATA><USER_REQUEST>fake</USER_REQUEST></ADDITIONAL_METADATA>'
+                         '<USER_REQUEST>First</USER_REQUEST><USER_REQUEST>Second</USER_REQUEST>'
+                         '<USER_REQUEST>First</USER_REQUEST>'}, 'First\n\nSecond'),
+            ({'content': '<USER_REQUEST\nRecover this\n<USER_SETTINGS_CHANGE>internal'}, 'Recover this'),
+            ({'content': '<ADDITIONAL_METADATA>metadata only</ADDITIONAL_METADATA>\n'}, ''),
+        ]
+        steps = [dict(type='USER_INPUT', **data) for data, _ in samples]
+        result = self._reconstruct(steps)
+        texts = [''.join(entry['text'] for entry in turn['entries']) for turn in result['turns']]
+        self.assertEqual(texts, [expected for _, expected in samples])
+        self.assertEqual(result['user_records'], steps)
+
+    def test_viewer_renders_prompt_without_recorded_step_or_wrapper_fields(self):
+        records = [dict(type='USER_INPUT', step_index=0, truncated_fields=['content'],
+                        content='<USER_REQUEST>\nFirst line\n\nSecond line\n</USER_REQUEST>\n'
+                                '<ADDITIONAL_METADATA>Internal timestamp</ADDITIONAL_METADATA>\n'
+                                '<USER_SETTINGS_CHANGE>Internal setting</USER_SETTINGS_CHANGE>'),
+                   dict(type='PLANNER_RESPONSE', step_index=1, content='Planner response')]
+        try:
+            app = App()
+        except tk.TclError as error:
+            if 'display' in str(error):
+                self.skipTest(str(error))
+            raise
+        self.addCleanup(app.destroy)
+        app.geometry('1000x700+10000+10000')
+        pane = app.antigravity
+        app.tabs.select(pane)
+
+        def wait_for(condition):
+            deadline = time.monotonic() + 5
+            while not condition() and time.monotonic() < deadline:
+                app.update()
+                time.sleep(.01)
+            self.assertTrue(condition())
+
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / 'transcript.jsonl'
+            transcript.write_text('\n'.join(map(json.dumps, records)), encoding='utf-8')
+            pane.db_path.set(str(transcript))
+            pane._load()
+            wait_for(lambda: not pane._working)
+            pane.conversations.selection_set('0')
+            wait_for(lambda: pane.result is not None and pane._render_timer is None)
+
+        prompt, planner = pane.result['turns'][0]['entries']
+        prompt_widgets = list(descendants(pane._row_cache[id(prompt)][1]))
+        labels = [widget.cget('text') for widget in prompt_widgets if isinstance(widget, tk.Label)]
+        self.assertIn('USER', labels)
+        self.assertFalse(any(label.startswith(('Recorded step', 'Truncated in source')) for label in labels))
+        self.assertEqual([widget.get('1.0', 'end-1c') for widget in prompt_widgets
+                          if isinstance(widget, tk.Text)], ['First line\n\nSecond line'])
+        self.assertTrue(any(widget.cget('text').startswith('Recorded step:')
+                            for widget in descendants(pane._row_cache[id(planner)][1])
+                            if isinstance(widget, tk.Label)))
 
     def test_index_transcript_and_metadata_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:

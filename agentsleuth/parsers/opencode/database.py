@@ -49,10 +49,12 @@ def load_threads(path: Path):
         for row in connection.execute('SELECT * FROM "session"'):
             fields = {key.lower(): row[key] for key in row.keys()}
             ident = fields['id']
+            title = str(fields.get('title') or '').strip()
             sessions.append({
                 'id': ident,
                 'source_detail': f'Session ID  {ident}',
-                'name': str(fields.get('title') or '').strip() or f'Unnamed conversation ({ident})',
+                'name': title or f'Unnamed conversation ({ident})',
+                'export_title': title,
                 'cwd': str(fields.get('directory') or ''),
                 'time_created': fields.get('time_created'),
                 'time_updated': fields.get('time_updated'),

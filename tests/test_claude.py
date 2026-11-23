@@ -260,10 +260,12 @@ class ClaudeParserTest(unittest.TestCase):
         image, = result['attachments']
         self.assertEqual((image['mime'], image['source']['raw']['uuid']), ('image/png', 'user-one'))
         self.assertEqual(Path(image['saved_path']).read_bytes(), base64.b64decode(IMAGE))
-        stored = list((self.output / 'Claude' / SESSION).glob('*/*'))
+        session_output = self.output / 'Claude' / result['thread']['name']
+        self.assertEqual(Path(result['output_directory']), session_output)
+        stored = list(session_output.glob('*/*'))
         self.assertEqual(len(stored), 5)
         self.parse()
-        self.assertEqual(list((self.output / 'Claude' / SESSION).glob('*/*')), stored)
+        self.assertEqual(list(session_output.glob('*/*')), stored)
         self.assertEqual(self.index.read_bytes(), original_history)
         self.assertEqual(self.transcript.read_bytes(), original_transcript)
 

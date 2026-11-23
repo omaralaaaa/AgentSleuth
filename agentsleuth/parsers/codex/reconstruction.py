@@ -9,17 +9,18 @@ from .events import (
     classify, normalize_message, normalize_call, normalize_output,
     normalize_activity, deduplicate_messages, correlate,
 )
-from .paths import rollout_for_thread, _result_dir
+from .paths import rollout_for_thread
 from .recovery import _recover_file_changes
 from .metadata import prompt_permissions
+from ...core.export import ExportSession
 from ...core.utils import short
 
 
 def reconstruct_from_thread(db_path: Path, thread: dict, root: Path, progress=None):
     """Parse selected rollout in ordinal order; save extracted assets only, no reports."""
     source = rollout_for_thread(db_path, thread)
-    destination = _result_dir(root.expanduser().resolve(), thread)
-    extractor = AttachmentExtractor(destination / 'attachments')
+    destination = ExportSession.from_thread(root, 'Codex', thread)
+    extractor = AttachmentExtractor(destination)
     messages, calls, outputs, activities = [], [], [], []
     valid, invalid, max_ordinal = 0, 0, -1
     session = {}
@@ -128,7 +129,7 @@ def reconstruct_from_thread(db_path: Path, thread: dict, root: Path, progress=No
         'activities': len(activities), 'attachments': len(extractor.entries),
         'recovered_files': len(recovered),
     }
-    return {'thread': thread, 'source_path': str(source), 'output_directory': str(destination),
+    return {'thread': thread, 'source_path': str(source), 'output_directory': str(destination.directory),
             'session': session, 'turns': turns, 'summary': summary,
             'attachments': extractor.entries, 'recovered_files': recovered,
             'attachment_failures': extractor.failures}

@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 AgentSleuth_Results/
+AgentSleuth_Export/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm

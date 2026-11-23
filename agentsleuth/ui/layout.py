@@ -34,6 +34,7 @@ class LayoutMixin:
                 foreground=[('disabled', self.DIM), ('!disabled', self.BG)])
         sty.configure('TEntry', fieldbackground=self.BG, foreground=self.FG,
                       insertcolor=self.ACCENT, padding=5)
+        sty.map('TEntry', fieldbackground=[('readonly', self.BG)])
         sty.configure('TProgressbar', background=self.ACCENT, troughcolor=self.PANEL)
         sty.configure('TCombobox', padding=5)
         sty.map('TCombobox', fieldbackground=[('readonly', self.PANEL)],
@@ -88,8 +89,10 @@ class LayoutMixin:
         if self.uses_output_directory:
             out_row = tk.Frame(top, bg=self.BG)
             out_row.pack(fill='x', pady=(4, 4))
-            self._label(out_row, 'Extracted files:', self.DIM).pack(side='left', padx=(0, 9))
-            ttk.Entry(out_row, textvariable=self.output_root).pack(side='left', fill='x', expand=True)
+            self._label(out_row, 'Export directory:', self.DIM).pack(side='left', padx=(0, 9))
+            ttk.Entry(out_row, textvariable=self.output_root, state='readonly').pack(
+                side='left', fill='x', expand=True
+            )
             ttk.Button(out_row, text='Change folder', command=self._browse_output).pack(side='left', padx=(7, 0))
         status_row = tk.Frame(top, bg=self.BG)
         status_row.pack(fill='x', pady=(4, 0))

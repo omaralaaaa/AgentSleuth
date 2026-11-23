@@ -288,7 +288,7 @@ class ConversationMixin:
             timestamp = recorded[:19].replace('T', ' ') + ' UTC' if recorded else ''
         meta = f'#{entry["ordinal"]}' + (f'  ·  {timestamp}' if timestamp else '')
         self._label(header, meta, self.DIM, ('Consolas', 8)).pack(side='right')
-        if entry.get('agent') == 'antigravity':
+        if entry.get('agent') == 'antigravity' and not user:
             self._field(card, 'Recorded step', entry.get('step_index'))
             if entry.get('truncated_fields'):
                 self._field(card, 'Truncated in source', safe_text(entry['truncated_fields']))
@@ -347,7 +347,7 @@ class ConversationMixin:
         self._field(panel, 'Recorded error', execution['error'], multiline=True, show_empty=True)
         status = execution['status']
         self._field(panel, 'Status', status if status is not None else 'Not recorded')
-        if entry.get('agent') != 'claude':
+        if entry.get('agent') not in ('claude', 'opencode'):
             self._field(panel, 'Started', execution['start_label'])
             self._field(panel, 'Ended', execution['end_label'])
             self._field(panel, 'Metadata', execution['metadata'], multiline=True, show_empty=True)

@@ -69,7 +69,10 @@ def build_database(path, output='recorded output'):
                                                state=dict(status='pending', input={'command': 'pwd'})), 3)
         part('bash-completed', 'a-reply', 8, dict(type='tool', tool='bash', callID='bash-call',
                                                  state=dict(status='completed', output=output,
-                                                            metadata={'count': 0}, time={'start': 6, 'end': 8})), 4)
+                                                            metadata={'output': output, 'exit': 0,
+                                                                      'description': 'Internal tool description',
+                                                                      'truncated': False},
+                                                            time={'start': 6, 'end': 8})), 4)
         part('failed', 'a-reply', 9, dict(type='tool', tool='read', callID='read-call',
                                          state=dict(status='error', error='Permission denied')), 5)
         part('running', 'a-reply', 10, dict(type='tool', tool='search', state={'status': 'running'}), 6)
@@ -241,7 +244,8 @@ class OpenCodeTest(unittest.TestCase):
         self.assertEqual(execution['arguments'], {'command': 'pwd'})
         self.assertEqual(execution['command'], 'pwd')
         self.assertEqual(execution['output'], 'recorded output')
-        self.assertEqual(execution['metadata'], {'count': 0})
+        self.assertEqual(execution['metadata'], {'output': 'recorded output', 'exit': 0,
+                                                 'description': 'Internal tool description', 'truncated': False})
         self.assertEqual((execution['start'], execution['end']), (6, 8))
         self.assertEqual([row['id'] for row in merged['raw']['parts']], ['bash-pending', 'bash-completed'])
         self.assertEqual(entries[1]['execution']['error'], 'Permission denied')
@@ -457,6 +461,8 @@ class OpenCodeViewerTest(unittest.TestCase):
         labels = [widget.cget('text') for widget in descendants(pane.canvas)
                   if isinstance(widget, tk.Label)]
         self.assertFalse(any(label.startswith(('Message ID', 'Part ID', 'Call ID')) for label in labels))
+        self.assertFalse(any(label.startswith(('Started:', 'Ended:')) or label == 'Metadata' for label in labels))
+        self.assertIn('Status:  completed', labels)
         call_ids = {entry['call_id'] for entry in rendered if 'execution' in entry and entry['call_id']}
         self.assertEqual(call_ids, {'bash-call', 'read-call'})
         self.assertFalse(any(call_id in label for call_id in call_ids for label in labels))
@@ -467,12 +473,22 @@ class OpenCodeViewerTest(unittest.TestCase):
         self.assertEqual([widget.get('1.0', 'end-1c') for widget in descendants(error_card)
                           if isinstance(widget, tk.Text)], ['This API key has expired.'])
 
-        body, = (widget for widget in descendants(pane.canvas) if isinstance(widget, tk.Text)
-                 and widget.get('end-1c linestart', 'end-1c') == 'Unique ending')
+        widgets = [widget for widget in descendants(pane.canvas) if isinstance(widget, tk.Text)]
+        contents = [widget.get('1.0', 'end-1c') for widget in widgets]
+        self.assertIn('First response', contents)
+        self.assertIn('Permission denied', contents)
+        self.assertIn('pwd', ' '.join(contents))
+        self.assertFalse(any('Internal tool description' in text or '"truncated"' in text for text in contents))
+        self.assertEqual(sum(text.count('Unique ending') for text in contents), 1)
+        body, = (widget for widget, text in zip(widgets, contents) if text == output)
         self.assertEqual(body.get('1.0', 'end-1c'), output)
         self.assertEqual(int(body['height']), 9)
         self.assertTrue(any(child.winfo_manager() == 'pack' for child in body.master.winfo_children()
                             if str(child.winfo_class()) == 'TScrollbar'))
+        execution, = (entry for entry in rendered if entry.get('call_id') == 'bash-call')
+        item, _ = pane._row_cache[id(execution)]
+        pane.canvas.yview_moveto(pane.canvas.coords(item)[1] / pane._content_height)
+        root.update()
         outer = pane.canvas.yview()
         body.event_generate('<MouseWheel>', delta=-120)
         self.assertGreater(body.yview()[0], 0)

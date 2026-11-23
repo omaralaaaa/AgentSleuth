@@ -4,6 +4,7 @@ import ntpath
 from pathlib import Path
 
 from ...core.artifacts import ArtifactStore, MAX_FILE_BYTES
+from ...core.export import ExportSession
 from .paths import SESSION_ID
 
 
@@ -13,10 +14,9 @@ def filename(path):
 
 
 class Artifacts(ArtifactStore):
-    def __init__(self, output_root, evidence_root, session_id, project_paths):
+    def __init__(self, output_root, evidence_root, session_id, project_paths, *, title=None):
         if not SESSION_ID.fullmatch(session_id):
             raise ValueError('Invalid Claude Code session identifier')
-        self.root = output_root.expanduser().resolve()
         self.evidence_root = evidence_root
         protected = [evidence_root]
         for value in set(project_paths):
@@ -26,4 +26,4 @@ class Artifacts(ArtifactStore):
                     protected.append(project.resolve())
             except (OSError, RuntimeError, ValueError):
                 continue
-        super().__init__(self.root / 'Claude' / session_id, protected)
+        super().__init__(ExportSession(output_root, 'Claude', session_id, title), protected)

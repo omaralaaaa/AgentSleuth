@@ -76,6 +76,7 @@ def load_threads(db_path: Path):
         results.append({
             'id': ident,
             'name': display_name,
+            'export_title': name,
             'rollout_path': str(_first(row, 'rollout_path', 'rollout_file', 'path', default='') or ''),
             'cwd': str(_first(row, 'cwd', 'working_directory', 'workdir', default='') or ''),
             'sandbox_policy': _first(row, 'sandbox_policy', 'sandbox_mode'),

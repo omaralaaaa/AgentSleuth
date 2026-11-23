@@ -36,12 +36,14 @@ Each result represents one agent folder. Double-click a row or click **Open fold
 ### Open a source manually
 
 1. Select an agent tab and browse to its source file. Use **Load conversations** after entering a path manually.
-2. For providers that extract files, choose the results folder before opening the session. The default is `AgentSleuth_Results/` under the checkout.
+2. The default export directory is `AgentSleuth_Export/` beside the application script. **Change folder** selects a shared directory for all agent tabs and saves the choice for future launches.
 3. Select a conversation in the sidebar. The sidebar filter searches conversation names, working directories, and IDs. Each tab loads and caches its own sessions.
 4. Press **Ctrl+F** to search the selected transcript. Terms are case-insensitive and can appear in any order. The filter lists values present in the selected conversation or turn, including exact tool names, activity types, and recorded statuses. For example, a recorded Bash call can match **Commands**, **Tool calls**, or **Tool: bash**. Filtering by a tool name also includes failed attempts. Tree view keeps a matching reply's parent prompt for context.
 5. Choose **Tree** to group responses and tool calls under each prompt, or **Conversation** to read matching entries in timeline order. Switching views keeps the selected turn, search, and filters. Returning to Tree restores folded prompts. Long text blocks scroll independently. Click an extracted filename to reveal its copy in the file manager.
 
 ## Interpret the results
+
+AgentSleuth creates export folders when it saves an artifact. Files go under the agent and conversation title, in `attachments/` or `recovered_files/` according to the artifact type. When a title folder is already taken, AgentSleuth adds a short session ID suffix.
 
 ### Codex
 
