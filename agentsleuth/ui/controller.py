@@ -1,26 +1,25 @@
 """GUI actions: load databases, select threads and coordinate background work."""
 
 import queue
-import threading
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 
 from ..core.utils import short
 from ..core.search import TranscriptIndex
-
-
-
+from .worker import load_threads, reconstruct
 
 
 class ControllerMixin:
     def _browse_db(self):
-        path = filedialog.askopenfilename(title=self.parser.source_hint, filetypes=self.parser.filetypes)
+        path = filedialog.askopenfilename(parent=self, title=self.parser.source_hint,
+                                         filetypes=self.parser.filetypes)
         if path:
             self.db_path.set(path)
             self._load()
 
     def _browse_output(self):
-        path = filedialog.askdirectory(title='Choose extracted-files directory', initialdir=self.output_root.get())
+        path = filedialog.askdirectory(parent=self, title='Choose extracted-files directory',
+                                       initialdir=self.output_root.get())
         if path:
             self.output_root.set(path)
             self.cache.clear()
@@ -32,7 +31,7 @@ class ControllerMixin:
 
     def _set_busy(self, busy):
         self._working = busy
-        self.load_button.configure(state='disabled' if busy else 'normal')
+        self.load_button.configure(state='disabled' if self._loading else 'normal')
         if busy:
             self.progress.pack(side='right', padx=(12, 0))
             self.progress.start(30)
@@ -41,21 +40,32 @@ class ControllerMixin:
             self.progress.pack_forget()
 
     def _load(self):
-        if self._working:
+        source = self.db_path.get().strip().strip('"')
+        if not source:
+            self.status.set(self.parser.source_hint)
             return
-        path = Path(self.db_path.get().strip().strip('"'))
-        if not path.is_file():
-            messagebox.showerror('Missing source file', self.parser.source_hint)
-            return
+        self._loading = True
         self._set_busy(True)
         self.status.set(f'Reading {self.parser.name} conversations…')
-        def task():
-            try:
-                data = self.parser.load_threads(path)
-                self.messages_queue.put(('loaded', data))
-            except Exception as error:
-                self.messages_queue.put(('error', str(error)))
-        threading.Thread(target=task, daemon=True).start()
+        self.worker.start('loaded', load_threads, self.parser, Path(source))
+
+    def _display_loaded(self, path, threads):
+        self._loaded_db = path
+        self.threads = threads
+        self.cache.clear()
+        self.current_thread_idx = None
+        self._active_cache_key = None
+        self.result = None
+        self._populate_threads()
+        self._clear_chat()
+        self.thread_title.configure(text='Select a conversation')
+        self.thread_cwd.configure(text='')
+        self.thread_rollout.configure(text='')
+        self._reset_view_options()
+        status = f'Loaded {len(threads)} conversations'
+        if self.visible_index:
+            status += ' · select one to view'
+        self.status.set(status)
 
     def _populate_threads(self):
         old_idx = self.current_thread_idx
@@ -65,7 +75,7 @@ class ControllerMixin:
         needle = self.filter_text.get().strip().lower()
         visible_names = []
         for idx, thread in enumerate(self.threads):
-            searchable = ' '.join((thread.get('name', ''), thread.get('cwd', ''), thread.get('id', '')))
+            searchable = ' '.join(str(thread.get(key) or '') for key in ('name', 'cwd', 'id'))
             if needle and needle not in searchable.lower():
                 continue
             self.visible_index.append(idx)
@@ -86,7 +96,7 @@ class ControllerMixin:
 
     def _select_thread(self, _event=None):
         selected = self.conversations.selection()
-        if not selected or self._working:
+        if not selected or self._loading or self._loaded_db is None:
             return
         try:
             thread_index = int(selected[0])
@@ -95,80 +105,69 @@ class ControllerMixin:
         if thread_index < 0 or thread_index >= len(self.threads):
             return
         thread = self.threads[thread_index]
-        cache_key = (thread['id'], thread['rollout_path'], self.output_root.get())
-        if (self.current_thread_idx == thread_index and self.result is not None
+        output_root = Path(self.output_root.get()) if self.output_root is not None else None
+        cache_key = (self._loaded_db, thread['id'], output_root)
+        if (self.current_thread_idx == thread_index and (self.result is not None or self._working)
                 and self._active_cache_key == cache_key):
             return
         self.current_thread_idx = thread_index
         self._active_cache_key = cache_key
         self._display_header(thread)
         self._clear_chat()
-        self._section('Reconstructing selected conversation…')
-        self.status.set(f'Reading rollout for: {thread["name"]}')
+        self._reset_view_options()
         if cache_key in self.cache:
+            self.worker.invalidate()
+            self._set_busy(False)
             self.result = self.cache[cache_key]
             self._after_reconstruct()
             return
         self.result = None
-        selected_db = Path(self.db_path.get())
-        selected_root = Path(self.output_root.get())
+        self._section('Reconstructing selected conversation…')
+        source = 'rollout' if self.uses_output_directory else 'OpenCode evidence'
+        self.status.set(f'Reading {source} for {thread["name"]}')
         self._set_busy(True)
-        def task():
-            try:
-                data = self.parser.reconstruct_from_thread(
-                    selected_db, thread, selected_root,
-                    lambda s: self.messages_queue.put(('progress', s)))
-                data['_search_index'] = TranscriptIndex(data['turns'])
-                self.messages_queue.put(('reconstructed', (thread_index, cache_key, data)))
-            except Exception as error:
-                self.messages_queue.put(('parse_error', str(error)))
-        threading.Thread(target=task, daemon=True).start()
+        self.worker.start('reconstructed', reconstruct, self.parser, self._loaded_db,
+                          thread, output_root)
 
     def _display_header(self, thread):
         self.thread_title.configure(text=thread['name'])
         self.thread_cwd.configure(text='Working directory (cwd): ' + (thread['cwd'] or 'Unknown'))
-        self.thread_rollout.configure(text='Rollout: ' + (thread['rollout_path'] or 'Not recorded'))
+        if self.uses_output_directory:
+            self.thread_rollout.configure(text='Rollout: ' + (thread.get('rollout_path') or 'Not recorded'))
+        else:
+            self.thread_rollout.configure(text=f'Session ID  {thread["id"]}')
+
+    def _reset_view_options(self):
+        self.turn_options.configure(values=['Entire conversation'])
+        self.turn_options.current(0)
+        self.conversation_stats.configure(text='')
 
     def _poll(self):
         for _ in range(45):
             try:
-                kind, value = self.messages_queue.get_nowait()
+                request, kind, value = self.worker.results.get_nowait()
             except queue.Empty:
                 break
+            if request != self.worker.request:
+                continue
             if kind == 'progress':
                 self.status.set(value)
             elif kind == 'loaded':
+                self._loading = False
                 self._set_busy(False)
-                self.threads = value
-                self.current_thread_idx = None
-                self._active_cache_key = None
-                self.result = None
-                self.cache.clear()
-                self._populate_threads()
-                self._clear_chat()
-                self.thread_title.configure(text='Select a conversation')
-                self.thread_cwd.configure(text='')
-                self.thread_rollout.configure(text='')
-                self.turn_options.configure(values=['Entire conversation'])
-                self.turn_options.current(0)
-                self.conversation_stats.configure(text='')
-                if self.threads and self.conversations.get_children(''):
-                    self.status.set(
-                        f'Loaded {len(value)} conversations · select one to view'
-                    )
-                else:
-                    self.status.set(f'Loaded {len(value)} conversations')
+                self._display_loaded(*value)
             elif kind == 'reconstructed':
                 self._set_busy(False)
-                idx, key, result = value
-                self.cache[key] = result
-                if self.current_thread_idx == idx:
-                    self.result = result
-                    self._after_reconstruct()
-            elif kind in {'error', 'parse_error'}:
+                self.cache[self._active_cache_key] = self.result = value
+                self._after_reconstruct()
+            elif kind == 'error':
+                self._loading = False
                 self._set_busy(False)
-                self.status.set('Error while loading evidence')
-                messagebox.showerror('AgentSleuth', str(value))
+                self.status.set(f'Error reading {self.parser.name} evidence · {value}')
+                if self.result is None:
+                    self.conversations.selection_remove(self.conversations.selection())
+                    self._clear_chat()
+                    self._section(value)
         self._poll_timer = self.after(100, self._poll)
 
     def _after_reconstruct(self):
@@ -182,9 +181,6 @@ class ControllerMixin:
         self.turn_options.current(0)
         s = self.result['summary']
         self.conversation_stats.configure(text=f'{s["turns"]} turns · {s["activities"]} activities')
-        self.status.set(f'Conversation loaded · {s["attachments"]} embedded attachments · '
-                        f'{s["recovered_files"]} file changes rebuilt · '
-                        f'{s["max_ordinal"]} max ordinal')
         self._render()
 
     def _clear_chat(self):

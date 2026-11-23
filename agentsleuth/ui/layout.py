@@ -9,6 +9,13 @@ from ..core.search import ENTRY_TYPES
 
 
 class LayoutMixin:
+    BG = '#191b1f'
+    PANEL = '#23262b'
+    FG = '#dee1e5'
+    DIM = '#adb3bc'
+    ACCENT = '#99b5d3'
+    BORDER = '#454a53'
+
     def _style(self):
         sty = ttk.Style(self)
         sty.theme_use('clam')
@@ -34,6 +41,10 @@ class LayoutMixin:
                 selectforeground=[('readonly', self.FG)])
         sty.configure('TScrollbar', background=self.BORDER, troughcolor=self.BG)
         sty.map('TScrollbar', background=[('active', '#59616d')])
+        sty.configure('TNotebook', background=self.BG, borderwidth=0)
+        sty.configure('TNotebook.Tab', padding=(13, 5))
+        sty.map('TNotebook.Tab', background=[('selected', self.ACCENT)],
+                foreground=[('selected', self.BG)])
         sty.configure('Conversations.Treeview',
                       background=self.PANEL, fieldbackground=self.PANEL,
                       foreground=self.FG, rowheight=29, borderwidth=0,
@@ -51,7 +62,7 @@ class LayoutMixin:
         return tk.Label(parent, text=text_value, bg=parent.cget('bg'), fg=fg or self.FG,
                         font=font or ('Consolas', 10), **kwargs)
 
-    def _build(self):
+    def _build_masthead(self):
         top = tk.Frame(self, bg=self.BG, padx=15, pady=10)
         top.pack(fill='x')
         masthead = tk.Frame(top, bg=self.PANEL, padx=12, pady=4)
@@ -63,6 +74,10 @@ class LayoutMixin:
         mark.create_rectangle(13, 15, 21, 17, fill=self.ACCENT, outline='')
         self._label(masthead, 'AGENTSLEUTH', self.FG, ('Consolas', 19, 'bold')).pack(side='left')
         self._label(masthead, 'FORENSIC CONSOLE', self.DIM, ('Consolas', 10)).pack(side='right')
+
+    def _build(self):
+        top = tk.Frame(self, bg=self.BG, padx=15, pady=10)
+        top.pack(fill='x')
         db_row = tk.Frame(top, bg=self.BG)
         db_row.pack(fill='x', pady=(11, 4))
         self._label(db_row, self.parser.source_label, self.DIM).pack(side='left', padx=(0, 9))
@@ -70,11 +85,12 @@ class LayoutMixin:
         ttk.Button(db_row, text='Browse', command=self._browse_db).pack(side='left', padx=(7, 4))
         self.load_button = ttk.Button(db_row, text='Load conversations', style='Accent.TButton', command=self._load)
         self.load_button.pack(side='left')
-        out_row = tk.Frame(top, bg=self.BG)
-        out_row.pack(fill='x', pady=(4, 4))
-        self._label(out_row, 'Extracted files:', self.DIM).pack(side='left', padx=(0, 9))
-        ttk.Entry(out_row, textvariable=self.output_root).pack(side='left', fill='x', expand=True)
-        ttk.Button(out_row, text='Change folder', command=self._browse_output).pack(side='left', padx=(7, 0))
+        if self.uses_output_directory:
+            out_row = tk.Frame(top, bg=self.BG)
+            out_row.pack(fill='x', pady=(4, 4))
+            self._label(out_row, 'Extracted files:', self.DIM).pack(side='left', padx=(0, 9))
+            ttk.Entry(out_row, textvariable=self.output_root).pack(side='left', fill='x', expand=True)
+            ttk.Button(out_row, text='Change folder', command=self._browse_output).pack(side='left', padx=(7, 0))
         status_row = tk.Frame(top, bg=self.BG)
         status_row.pack(fill='x', pady=(4, 0))
         self.progress = ttk.Progressbar(status_row, mode='indeterminate', length=140)
@@ -142,10 +158,10 @@ class LayoutMixin:
         filters = tk.Frame(right, bg=self.BG, padx=15)
         filters.pack(fill='x', pady=(0, 5))
         self._label(filters, 'Search:', self.DIM).pack(side='left', padx=(0, 6))
-        self.query = tk.StringVar()
-        search = ttk.Entry(filters, textvariable=self.query, width=14)
-        search.pack(side='left', fill='x', expand=True)
-        self.entry_type = tk.StringVar(value=ENTRY_TYPES[0])
+        self.query = tk.StringVar(self)
+        self.search_entry = ttk.Entry(filters, textvariable=self.query, width=14)
+        self.search_entry.pack(side='left', fill='x', expand=True)
+        self.entry_type = tk.StringVar(self, value=ENTRY_TYPES[0])
         kinds = ttk.Combobox(filters, state='readonly', width=17, values=ENTRY_TYPES,
                              textvariable=self.entry_type)
         kinds.pack(side='left', padx=6)
@@ -156,7 +172,6 @@ class LayoutMixin:
         self._search_timer = None
         self.query.trace_add('write', self._schedule_search)
         self.entry_type.trace_add('write', self._schedule_search)
-        self.bind('<Control-f>', lambda _: search.focus_set())
 
         container = tk.Frame(right, bg=self.BG)
         container.pack(fill='both', expand=True)
@@ -175,7 +190,7 @@ class LayoutMixin:
 
         # Put a custom bindtag before Text/Treeview class bindings so the main
         # conversation canvas receives the wheel anywhere inside the pane.
-        self._conversation_wheel_tag = 'AgentSleuthConversationWheel'
+        self._conversation_wheel_tag = f'AgentSleuthConversationWheel{self}'
         self.bind_class(self._conversation_wheel_tag, '<MouseWheel>', self._on_conversation_wheel)
         self.bind_class(self._conversation_wheel_tag, '<Button-4>', lambda e: self._on_conversation_wheel(e, -1))
         self.bind_class(self._conversation_wheel_tag, '<Button-5>', lambda e: self._on_conversation_wheel(e, 1))

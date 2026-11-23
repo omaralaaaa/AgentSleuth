@@ -2,7 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = []
 # ///
-"""AgentSleuth launcher. Run with: uv run script.py"""
+"""Alternative Python launcher for AgentSleuth."""
 
 from agentsleuth.ui.app import main
 

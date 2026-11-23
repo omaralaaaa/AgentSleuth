@@ -100,7 +100,8 @@ class ConversationMixin:
             status = f'{total} matching entries'
             if hidden:
                 status += f' · {hidden} collapsed'
-            self.status.set(status + (f' · {errors} render warnings' if errors else ''))
+            if not self._working:
+                self.status.set(status + (f' · {errors} render warnings' if errors else ''))
             if processed < len(requested):
                 self._render_timer = self.after(10, append_batch)
             elif created:
@@ -161,6 +162,8 @@ class ConversationMixin:
         scroll = ttk.Scrollbar(holder, orient='vertical', command=txt.yview)
         txt.configure(yscrollcommand=scroll.set)
         value = safe_text(content)
+        if not value.isascii():
+            value = value.encode('utf-8', errors='backslashreplace').decode('utf-8')
         if powershell:
             insert_command(txt, value)
         else:
@@ -190,8 +193,8 @@ class ConversationMixin:
         txt.bind('<Configure>', fit)
         return txt
 
-    def _field(self, panel, label, value, multiline=False, powershell=False):
-        if value is None or value == '':
+    def _field(self, panel, label, value, multiline=False, powershell=False, show_empty=False):
+        if value is None or (value == '' and not show_empty):
             return
         if not multiline:
             # Compact readable metadata: no two-line Text widget for every field.
@@ -223,7 +226,9 @@ class ConversationMixin:
         card.pack(fill='x', expand=True, pady=(0 if user else 3, 0))
         header = tk.Frame(card, bg=bg)
         header.pack(fill='x', padx=13, pady=(10, 2))
-        if is_message:
+        if entry.get('agent') == 'opencode' and entry.get('event_type') == 'assistant_error':
+            label = 'ASSISTANT ERROR'
+        elif is_message:
             label = 'USER' if user else self.parser.name.upper() + (' · ' + entry['phase'] if entry.get('phase') else '')
         else:
             activity_labels = {
@@ -232,6 +237,12 @@ class ConversationMixin:
                 'McpToolCall': 'EXECUTION · MCP TOOL',
                 'DynamicToolCall': 'EXECUTION · DYNAMIC TOOL',
                 'CollabAgentToolCall': 'EXECUTION · COLLAB AGENT',
+                'ToolExecution': 'EXECUTION · TOOL',
+                'reasoning': 'RECORDED REASONING',
+                'file_attachment': 'FILE ATTACHMENT REFERENCE',
+                'file_change': 'FILE CHANGE ARTIFACT',
+                'raw_part': 'PART EVIDENCE',
+                'raw_message': 'MESSAGE EVIDENCE',
             }
             label = activity_labels.get(
                 entry.get('activity_type'),
@@ -239,7 +250,12 @@ class ConversationMixin:
             )
         self._label(header, label, self.ACCENT if is_message else self.DIM,
                     ('Consolas', 10, 'bold')).pack(side='left')
-        meta = f'#{entry["ordinal"]}  ·  {entry.get("timestamp", "")[:19].replace("T", " ")} UTC'
+        if 'timestamp_label' in entry:
+            timestamp = entry['timestamp_label']
+        else:
+            recorded = entry.get('timestamp') or ''
+            timestamp = recorded[:19].replace('T', ' ') + ' UTC' if recorded else ''
+        meta = f'#{entry["ordinal"]}' + (f'  ·  {timestamp}' if timestamp else '')
         self._label(header, meta, self.DIM, ('Consolas', 8)).pack(side='right')
         key = id(entry)
         count = self._index.response_counts.get(key, 0)
@@ -250,6 +266,14 @@ class ConversationMixin:
         if is_message:
             self._body(card, entry.get('text', ''), bg)
             self._file_links(card, entry.get('file_refs', []), entry.get('attachments', []))
+        elif 'execution' in entry:
+            self._render_execution(card, entry)
+        elif 'part_type' in entry:
+            self._field(card, 'Part type', entry.get('part_type'))
+            if 'text' in entry:
+                self._body(card, entry['text'], bg)
+            else:
+                self._field(card, 'Recorded evidence', entry['evidence'], multiline=True, show_empty=True)
         else:
             self._render_activity_fields(card, entry)
         if user and count:
@@ -269,6 +293,20 @@ class ConversationMixin:
             button = ttk.Button(card, text=caption(), command=toggle, style='Disclosure.TButton')
             button.pack(anchor='w', padx=8, pady=(0, 4))
         self._bind_conversation_wheel_tree(holder)
+
+    def _render_execution(self, panel, entry):
+        execution = entry['execution']
+        self._field(panel, 'Tool', execution['tool'])
+        self._field(panel, 'Input', execution['arguments'], multiline=True, show_empty=True)
+        if execution['partial_input'] != execution['arguments']:
+            self._field(panel, 'Recorded partial input', execution['partial_input'], multiline=True)
+        self._field(panel, 'Recorded output', execution['output'], multiline=True, show_empty=True)
+        self._field(panel, 'Recorded error', execution['error'], multiline=True, show_empty=True)
+        status = execution['status']
+        self._field(panel, 'Status', status if status is not None else 'Not recorded')
+        self._field(panel, 'Started', execution['start_label'])
+        self._field(panel, 'Ended', execution['end_label'])
+        self._field(panel, 'Metadata', execution['metadata'], multiline=True, show_empty=True)
 
     def _render_activity_fields(self, panel, activity):
         kind = activity['activity_type']
@@ -337,8 +375,8 @@ class ConversationMixin:
         """Show filename-only links to extracted copies, never original source paths."""
         extracted = [a for a in attachments
                      if a.get('status') == 'extracted' and a.get('filename')]
-        output_dir = Path(self.result['output_directory']) if self.result else None
-        attachment_dir = output_dir / 'attachments' if output_dir else None
+        output_dir = (self.result or {}).get('output_directory')
+        attachment_dir = Path(output_dir) / 'attachments' if output_dir else None
         used_ids = set()
 
         # Pair source marker names with decoded attachments by their order in

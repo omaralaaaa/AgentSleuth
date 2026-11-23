@@ -64,16 +64,19 @@ def reconstruct_from_thread(db_path: Path, thread: dict, root: Path, progress=No
             classification = classify(record)
             if not classification:
                 continue
-            record = extractor.sanitize(record, record)
+            raw = record
+            record = extractor.sanitize(raw, raw)
             if (m := normalize_message(record)):
                 m['turn_id'] = m['turn_id'] or active_turn or ''
                 m['_source_line'] = line_no
+                m['raw'] = raw
                 messages.append(m)
             if (c := normalize_call(record)):
                 calls.append(c)
             if (o := normalize_output(record)):
                 outputs.append(o)
             if (a := normalize_activity(record)):
+                a['raw'] = raw
                 activities.append(a)
             if progress and line_no % 250 == 0:
                 progress(f'Parsing rollout: {line_no:,} lines…')
@@ -98,6 +101,19 @@ def reconstruct_from_thread(db_path: Path, thread: dict, root: Path, progress=No
     entries.sort(key=lambda x: x['ordinal'])
     by_turn = {}
     for e in entries:
+        payload = e['raw']['payload']
+        item = payload.get('item')
+        item = item if isinstance(item, dict) else {}
+        role = e.get('role', item.get('role') or payload.get('role'))
+        event_type = e.get('activity_type')
+        message_id = item.get('message_id') or payload.get('message_id')
+        if e['kind'] == 'message':
+            event_type = 'user_prompt' if role == 'user' else 'assistant_response'
+            message_id = e.get('item_id') or message_id
+        e.update(agent='codex', session_id=session.get('session_id') or thread['id'], role=role,
+                 message_id=message_id,
+                 part_id=item.get('part_id') or payload.get('part_id'), event_type=event_type,
+                 call_id=item.get('call_id') or payload.get('call_id') or e.get('parent_call_id'))
         by_turn.setdefault(e.get('turn_id') or 'unknown-turn', []).append(e)
     turns = []
     for tid, es in by_turn.items():

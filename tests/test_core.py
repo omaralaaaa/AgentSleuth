@@ -126,6 +126,9 @@ class AgentSleuthCoreTests(unittest.TestCase):
         self.assertEqual(len(command_executions), 1)
         self.assertEqual(command_executions[0].get("parent_call_id"), "call_example_001")
         self.assertEqual(command_executions[0].get("correlation_note"), "inferred_command_match")
+        self.assertTrue(all(entry['agent'] == 'codex' and entry['session_id'] for entry in entries))
+        self.assertEqual(command_executions[0]['raw']['payload']['item']['type'], 'CommandExecution')
+        self.assertEqual(command_executions[0]['call_id'], 'call_example_001')
 
 
 if __name__ == "__main__":

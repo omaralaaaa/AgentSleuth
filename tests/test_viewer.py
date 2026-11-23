@@ -13,11 +13,12 @@ from agentsleuth.ui.powershell import insert_command, is_powershell
 class ViewerTest(unittest.TestCase):
     def test_prompt_folds_only_its_replies_and_tools(self):
         try:
-            app = App()
+            root = App()
         except tk.TclError as error:
             self.skipTest(str(error))
-        self.addCleanup(app.destroy)
-        app.geometry('1000x700+10000+10000')
+        self.addCleanup(root.destroy)
+        root.geometry('1000x700+10000+10000')
+        app = root.codex
         first, reply, second, later = [
             dict(kind='message', role=role, ordinal=n, text=str(n))
             for n, role in [(1, 'user'), (2, 'assistant'), (4, 'user'), (5, 'assistant')]
@@ -87,12 +88,13 @@ class ViewerTest(unittest.TestCase):
         provider = SimpleNamespace(name='Fixture', source_label='File', source_hint='Choose a file',
                                    filetypes=[], load_threads=load_threads)
         try:
-            app = App(parser=provider)
+            root = App(parser=provider)
         except tk.TclError as error:
             self.skipTest(str(error))
-        self.addCleanup(app.destroy)
+        self.addCleanup(root.destroy)
         self.addCleanup(release.set)
-        app.geometry('1000x700+10000+10000')
+        root.geometry('1000x700+10000+10000')
+        app = root.codex
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / 'sample'
             source.touch()
@@ -116,11 +118,12 @@ class ViewerTest(unittest.TestCase):
 
     def test_continuous_transcript_and_nested_scrolling(self):
         try:
-            app = App()
+            root = App()
         except tk.TclError as error:
             self.skipTest(str(error))
-        self.addCleanup(app.destroy)
-        app.geometry('1000x700+10000+10000')
+        self.addCleanup(root.destroy)
+        root.geometry('1000x700+10000+10000')
+        app = root.codex
         body = 'line of output\n' * 200
         turns = []
         for i in range(20):
