@@ -2,7 +2,7 @@
 
 import tkinter as tk
 from tkinter import ttk
-from ..core.search import ENTRY_TYPES
+from ..core.search import ALL_ENTRIES
 
 
 
@@ -73,7 +73,7 @@ class LayoutMixin:
         mark.create_line(5, 7, 10, 12, 5, 17, fill=self.ACCENT, width=2)
         mark.create_rectangle(13, 15, 21, 17, fill=self.ACCENT, outline='')
         self._label(masthead, 'AGENTSLEUTH', self.FG, ('Consolas', 19, 'bold')).pack(side='left')
-        self._label(masthead, 'FORENSIC CONSOLE', self.DIM, ('Consolas', 10)).pack(side='right')
+        ttk.Button(masthead, text='Scan for artifacts…', command=self.open_scanner).pack(side='right')
 
     def _build(self):
         top = tk.Frame(self, bg=self.BG, padx=15, pady=10)
@@ -153,10 +153,18 @@ class LayoutMixin:
         nav = tk.Frame(right, bg=self.BG, padx=15, pady=4)
         nav.pack(fill='x')
         self._label(nav, 'View:', self.DIM).pack(side='left', padx=(0, 8))
-        self.turn_options = ttk.Combobox(nav, state='readonly', width=60, values=['Entire conversation'])
+        self.view_mode = 'Tree'
+        self.view_buttons = {}
+        for mode in ('Tree', 'Conversation'):
+            button = ttk.Button(nav, text=mode, width=len(mode) + 1,
+                                style='Accent.TButton' if mode == self.view_mode else 'TButton',
+                                command=lambda choice=mode: self._set_view_mode(choice))
+            button.pack(side='left')
+            self.view_buttons[mode] = button
+        self.turn_options = ttk.Combobox(nav, state='readonly', width=18, values=['Entire conversation'])
         self.turn_options.pack(side='left', fill='x', expand=True)
         self.turn_options.current(0)
-        self.turn_options.bind('<<ComboboxSelected>>', self._render)
+        self.turn_options.bind('<<ComboboxSelected>>', self._turn_changed)
         self.conversation_stats = self._label(nav, '', self.DIM, ('Consolas', 9))
         self.conversation_stats.pack(side='left', padx=(9, 0))
 
@@ -166,12 +174,12 @@ class LayoutMixin:
         self.query = tk.StringVar(self)
         self.search_entry = ttk.Entry(filters, textvariable=self.query, width=14)
         self.search_entry.pack(side='left', fill='x', expand=True)
-        self.entry_type = tk.StringVar(self, value=ENTRY_TYPES[0])
-        kinds = ttk.Combobox(filters, state='readonly', width=17, values=ENTRY_TYPES,
-                             textvariable=self.entry_type)
-        kinds.pack(side='left', padx=6)
+        self.entry_type = tk.StringVar(self, value=ALL_ENTRIES)
+        self.filter_options = ttk.Combobox(filters, state='readonly', width=24, values=(ALL_ENTRIES,),
+                                          textvariable=self.entry_type)
+        self.filter_options.pack(side='left', padx=6)
         def clear_filters():
-            self.entry_type.set(ENTRY_TYPES[0])
+            self.entry_type.set(ALL_ENTRIES)
             self.query.set('')
         ttk.Button(filters, text='Clear', command=clear_filters).pack(side='left')
         self._search_timer = None

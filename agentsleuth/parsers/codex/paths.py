@@ -15,16 +15,20 @@ def rollout_for_thread(db_path: Path, thread: dict):
     db_folder = db_path.expanduser().resolve().parent
     stored = _path_from_stored(raw)
     candidates = []
+    scope = thread.get('_evidence_root')
     if stored.is_absolute():
-        candidates.append(stored)
+        if scope is None:
+            candidates.append(stored)
         # Allow evidence copied to a different host: keep path after sessions/.
         pieces = re.split(r'[/\\]+', raw)
-        indexes = [i for i, name in enumerate(pieces) if name.lower() == 'sessions']
+        indexes = [i for i, name in enumerate(pieces) if name.lower() in ('sessions', 'archived_sessions')]
         if indexes:
             candidates.append(db_folder.joinpath(*pieces[indexes[-1]:]))
     else:
         candidates += [db_folder / stored, db_folder.parent / stored]
     for candidate in candidates:
+        if scope is not None and not candidate.resolve().is_relative_to(scope):
+            continue
         if candidate.is_file():
             return candidate.resolve()
     checked = '\n'.join('  - ' + str(x) for x in candidates)

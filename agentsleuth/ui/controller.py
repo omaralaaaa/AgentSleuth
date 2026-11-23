@@ -5,7 +5,7 @@ from pathlib import Path
 from tkinter import filedialog
 
 from ..core.utils import short
-from ..core.search import TranscriptIndex
+from ..core.search import ALL_ENTRIES, TranscriptIndex
 from .worker import load_threads, reconstruct
 
 
@@ -50,6 +50,10 @@ class ControllerMixin:
         self.worker.start('loaded', load_threads, self.parser, Path(source))
 
     def _display_loaded(self, path, threads):
+        source, evidence_root = getattr(self, 'scan_source', (None, None))
+        if source == path and evidence_root is not None:
+            for thread in threads:
+                thread['_evidence_root'] = evidence_root
         self._loaded_db = path
         self.threads = threads
         self.cache.clear()
@@ -142,9 +146,20 @@ class ControllerMixin:
             self.thread_rollout.configure(text=f'Session ID  {thread["id"]}')
 
     def _reset_view_options(self):
+        self.filter_options.configure(values=(ALL_ENTRIES,))
         self.turn_options.configure(values=['Entire conversation'])
         self.turn_options.current(0)
         self.conversation_stats.configure(text='')
+
+    def _turn_changed(self, _event=None):
+        if self.result is None:
+            return
+        selection = self.turn_options.current()
+        choices = self._index.turn_filters[selection - 1] if selection > 0 else self._index.filters
+        self.filter_options.configure(values=choices)
+        if self.entry_type.get() not in choices:
+            self.entry_type.set(ALL_ENTRIES)
+        self._render()
 
     def _poll(self):
         for _ in range(45):
@@ -187,18 +202,17 @@ class ControllerMixin:
         self.turn_options.current(0)
         s = self.result['summary']
         self.conversation_stats.configure(text=f'{s["turns"]} turns · {s["activities"]} activities')
-        self._render()
+        self._turn_changed()
 
-    def _clear_chat(self):
-        if self._render_timer is not None:
-            self.after_cancel(self._render_timer)
-            self._render_timer = None
+    def _clear_chat(self, *, reset_folds=True):
+        self._cancel_render()
         self.canvas.delete('all')
         for row in self.canvas.winfo_children():
             row.destroy()
         self._rows.clear()
         self._row_cache.clear()
-        self._collapsed_prompts = set()
+        if reset_folds:
+            self._collapsed_prompts = set()
         self._content_height = 0
         self.canvas.configure(scrollregion=(0, 0, 0, 0))
         self._photos.clear()

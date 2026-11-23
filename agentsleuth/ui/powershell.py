@@ -34,9 +34,7 @@ def is_powershell(argv, text):
     return bool(re.match(r'\s*(?:[\w]+-[A-Za-z]\w*\b|\$[\w:]+\s*=)', text))
 
 
-def insert_command(widget, text):
-    for name, color in COLORS.items():
-        widget.tag_configure(name, foreground=color)
+def command_parts(text):
     # Insert tagged spans directly so offsets work for Unicode on every Tk build.
     parts = []
     pos = 0
@@ -52,5 +50,13 @@ def insert_command(widget, text):
         pos = token.end()
     if pos < len(text):
         parts.extend((text[pos:], ()))
+    return parts
+
+
+def insert_command(widget, text, parts=None):
+    for name, color in COLORS.items():
+        widget.tag_configure(name, foreground=color)
+    if parts is None:
+        parts = command_parts(text)
     if parts:
         widget.insert('1.0', *parts)

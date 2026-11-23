@@ -29,7 +29,7 @@ def _run(results, request, cancelled, completed, action, args):
 
 def load_threads(parser, path, _progress):
     path = path.expanduser().resolve()
-    if not path.is_file():
+    if not path.is_file() and not (getattr(parser, 'accepts_directory', False) and path.is_dir()):
         raise FileNotFoundError(f'{parser.source_hint}. File not found: {path}')
     return path, parser.load_threads(path)
 

@@ -5,19 +5,32 @@ import ntpath
 import os
 import subprocess
 import sys
+from threading import Event
+from time import perf_counter
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
 
 from ..core.paths import _path_from_stored
 from ..core.utils import safe_text
-from .powershell import insert_command, is_powershell
+from .powershell import insert_command
+from .render_plan import build_plan
 
 
 
 
 
 class ConversationMixin:
+    def _set_view_mode(self, mode):
+        if mode == self.view_mode:
+            return
+        self.view_mode = mode
+        for name, button in self.view_buttons.items():
+            button.configure(style='Accent.TButton' if mode == name else 'TButton')
+        if self.result is not None:
+            self._clear_chat(reset_folds=False)
+            self._render()
+
     def _schedule_search(self, *_):
         if self._search_timer is not None:
             self.after_cancel(self._search_timer)
@@ -30,37 +43,43 @@ class ConversationMixin:
     def _render(self, _event=None, *, keep_position=False):
         if not self.result:
             return
+        self._cancel_render()
+        selection = self.turn_options.current()
+        cancel = self._plan_cancel = Event()
+        future = self._plan_future = self._render_pool.submit(
+            build_plan, self._index, self.query.get(), self.entry_type.get(),
+            selection - 1 if selection > 0 else None, self.view_mode == 'Tree',
+            frozenset(self._collapsed_prompts), frozenset(self._row_cache), cancel)
+
+        def poll_plan():
+            if cancel.is_set():
+                return
+            if not future.done():
+                self._render_timer = self.after(10, poll_plan)
+                return
+            self._render_timer = self._plan_future = None
+            try:
+                plan = future.result()
+            except Exception as error:
+                self.status.set(f'Could not prepare transcript: {error}')
+                return
+            self._apply_plan(plan, keep_position)
+
+        self._render_timer = self.after(0, poll_plan)
+
+    def _cancel_render(self):
+        if self._plan_cancel is not None:
+            self._plan_cancel.set()
+        if self._plan_future is not None:
+            self._plan_future.cancel()
+            self._plan_future = None
         if self._render_timer is not None:
             self.after_cancel(self._render_timer)
             self._render_timer = None
-        selection = self.turn_options.current()
-        matches = self._index.matches(self.query.get(), self.entry_type.get(),
-                                      selection - 1 if selection > 0 else None)
-        requested = []
-        previous = None
-        current_prompt = None
-        total = 0
-        hidden = 0
-        for turn, _, entry in matches:
-            if turn != previous:
-                requested.append((('turn', turn), f'Turn {turn + 1}'))
-                previous = turn
-                current_prompt = None
-            total += 1
-            prompt = self._index.prompt_for.get(id(entry))
-            if prompt is not None:
-                if current_prompt != id(prompt):
-                    requested.append((id(prompt), prompt))
-                    current_prompt = id(prompt)
-                if current_prompt in self._collapsed_prompts:
-                    hidden += 1
-                    continue
-            elif entry.get('role') == 'user':
-                current_prompt = id(entry)
-            requested.append((id(entry), entry))
-        if not requested:
-            requested.append(('empty', 'No matching entries in this view.'))
-        wanted = {key for key, _ in requested}
+        self._command_styles.clear()
+
+    def _apply_plan(self, plan, keep_position):
+        requested, wanted, total, hidden, self._command_styles = plan
         for key, (item, row) in self._row_cache.items():
             if key not in wanted and row._shown:
                 self.canvas.itemconfigure(item, state='hidden')
@@ -74,7 +93,10 @@ class ConversationMixin:
             nonlocal processed, errors
             self._render_timer = None
             created = 0
+            deadline = perf_counter() + 0.008
             while processed < len(requested) and created < 8:
+                if processed and perf_counter() >= deadline:
+                    break
                 key, value = next(pending)
                 processed += 1
                 if key in self._row_cache:
@@ -165,13 +187,15 @@ class ConversationMixin:
         if not value.isascii():
             value = value.encode('utf-8', errors='backslashreplace').decode('utf-8')
         if powershell:
-            insert_command(txt, value)
+            insert_command(txt, value, powershell)
         else:
             txt.insert('1.0', value)
         logical_rows = value.count('\n') + 1
         txt.configure(state='disabled', height=min(logical_rows, max_rows))
         txt.pack(side='left', fill='x', expand=True)
         logical_overflow = logical_rows > max_rows
+        if logical_overflow:
+            scroll.pack(side='right', fill='y')
         last_width = 0
 
         def fit(event):
@@ -213,9 +237,13 @@ class ConversationMixin:
         is_message = kind == 'message'
         user = is_message and entry.get('role') == 'user'
         bg = '#28313b' if user else self.PANEL if is_message else '#25282d'
-        nested = id(entry) in self._index.prompt_for
+        tree = self.view_mode == 'Tree'
+        nested = tree and id(entry) in self._index.prompt_for
         holder = tk.Frame(self._new_row(), bg=self.BG)
-        holder.pack(fill='x', padx=(16, 16), pady=(8 if user else 0, 0))
+        margin = (16, 16)
+        if not tree and is_message:
+            margin = (54, 16) if user else (16, 54)
+        holder.pack(fill='x', padx=margin, pady=(8 if user else 0, 0))
         if nested:
             guide = tk.Frame(holder, bg=self.BG, width=24)
             guide.pack(side='left', fill='y')
@@ -291,7 +319,7 @@ class ConversationMixin:
             self._render_activity_fields(card, entry)
         for file in entry.get('file_links', ()):
             self._filename_link(card, file['filename'], file['saved_path'], file['suffix'])
-        if user and count:
+        if tree and user and count:
             def caption():
                 marker = '▸' if key in self._collapsed_prompts else '▾'
                 noun = 'response' if count == 1 else 'responses'
@@ -332,9 +360,8 @@ class ConversationMixin:
             self._field(panel, 'Working directory', activity.get('cwd'))
             self._field(panel, 'Exit code', activity.get('exit_code'))
             command = activity.get('command')
-            argv = (activity.get('item') or {}).get('command')
             self._field(panel, 'Shell command', command, multiline=True,
-                        powershell=is_powershell(argv, safe_text(command)))
+                        powershell=self._command_styles.pop(id(activity), None))
             output = activity.get('item', {}).get('aggregated_output')
             if output:
                 self._field(panel, 'Command stdout/stderr (aggregated)', output, multiline=True)

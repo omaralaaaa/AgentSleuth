@@ -30,6 +30,26 @@ def _related(root, session_id, source):
 
 def load_threads(path):
     path = Path(path).resolve()
+    if path.is_dir():
+        threads = []
+        ids = set()
+        for name in ('brain', 'conversations'):
+            parent = path / name
+            if not parent.is_dir() or parent.resolve() != parent:
+                continue
+            for child in parent.iterdir():
+                sid = child.name if name == 'brain' else child.stem
+                if name == 'conversations' and child.suffix.lower() != '.db':
+                    continue
+                if sid in ids:
+                    continue
+                source = _related(path, sid, path)
+                if source != path:
+                    ids.add(sid)
+                    threads.append(dict(id=sid, name=sid, cwd='', source_detail=str(source)))
+        if not threads:
+            raise ValueError('No generated transcripts or supported trajectory databases in this folder.')
+        return sorted(threads, key=lambda t: t['id'])
     if path.suffix.lower() == '.jsonl':
         sid = path.parents[2].name if path.as_posix().endswith('/' + TRANSCRIPT.as_posix()) else path.stem
         return [dict(id=sid, name=sid, cwd='', source_detail=str(path))]
@@ -78,7 +98,11 @@ def _records(path):
 def reconstruct_from_thread(path, thread, output_root=None, progress=None):
     path = Path(path).resolve()
     source = path
-    if thread.get('indexed'):
+    if path.is_dir():
+        source = _related(path, thread['id'], path)
+        if source == path:
+            raise FileNotFoundError('Session evidence is missing from the selected folder.')
+    elif thread.get('indexed'):
         source = _related(path.parent, thread['id'], path)
     elif path.parent.name == 'conversations' and path.suffix.lower() == '.db':
         source = _related(path.parent.parent, thread['id'], path)
@@ -102,7 +126,7 @@ def reconstruct_from_thread(path, thread, output_root=None, progress=None):
         for call in step.get('tool_calls') or []:
             if isinstance(call, dict):
                 entries.append(dict(base, kind='activity', activity_type='ToolExecution',
-                                    part_type='Tool request', text=safe_text(call),
+                                    part_type='Tool request', tool_name=call.get('name'), text=safe_text(call),
                                     evidence=safe_text(call)))
                 tool_calls += 1
         if not entries:

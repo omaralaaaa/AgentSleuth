@@ -3,27 +3,61 @@
 from .utils import safe_text
 
 
-ENTRY_TYPES = ('All entries', 'User messages', 'Assistant messages', 'Commands',
-               'File changes', 'Tool calls', 'Other activities')
+ALL_ENTRIES = 'All entries'
 
 
-def category(entry):
+def filter_values(entry):
+    """An execution can match its card type, exact tool name, and recorded status."""
+    activity = entry.get('activity_type') or ''
+    event = entry.get('event_type')
+    execution = entry.get('execution') or {}
+    item = entry.get('item') or {}
+    values = set()
     if entry.get('kind') == 'message':
-        return 'User messages' if entry.get('role') == 'user' else 'Assistant messages'
-    activity = entry.get('activity_type', '')
-    if activity == 'ToolExecution' or activity.endswith('ToolCall'):
-        return 'Tool calls'
-    return {'CommandExecution': 'Commands', 'FileChange': 'File changes', 'file_change': 'File changes'
-            }.get(activity, 'Other activities')
+        role = entry.get('role')
+        values.add({'user': 'User messages', 'assistant': 'Assistant messages'}.get(role, 'Messages'))
+        if event == 'assistant_error':
+            values.add('Errors')
+    elif activity == 'ToolExecution' or activity.endswith('ToolCall'):
+        values.add('Tool calls')
+    elif activity in ('CommandExecution', 'RUN_COMMAND'):
+        values.add('Commands')
+    elif activity in ('FileChange', 'file_change'):
+        values.add('File changes')
+    elif activity == 'file_attachment':
+        values.add('Attachments')
+    elif activity == 'ERROR_MESSAGE':
+        values.add('Errors')
+    if entry.get('attachments') or entry.get('file_refs'):
+        values.add('Attachments')
+    if activity:
+        detail = entry.get('part_type') if activity == 'raw_part' else activity
+        values.add(f'Type: {detail or activity}')
+    tool = execution.get('tool') or item.get('tool') or entry.get('tool_name')
+    if isinstance(tool, str) and tool.strip():
+        values.add(f'Tool: {tool}')
+        if tool.casefold() in ('bash', 'powershell', 'run_command', 'exec_command'):
+            values.add('Commands')
+        if tool.casefold() in ('edit', 'write', 'multiedit', 'apply_patch'):
+            values.add('File changes')
+    status = execution.get('recorded_status')
+    if status is None:
+        status = execution.get('status') if execution.get('status') is not None else entry.get('status')
+    if isinstance(status, (str, int)) and str(status).strip():
+        values.add(f'Status: {status}')
+    return frozenset(values)
 
 
 class TranscriptIndex:
     def __init__(self, turns):
         self.turns = []
+        self.turn_filters = []
+        all_values = set()
         self.prompt_for = {}
         self.response_counts = {}
         for turn in turns:
             records = []
+            turn_values = set()
             prompt = None
             for entry in turn['entries']:
                 if entry.get('kind') == 'message' and entry.get('role') == 'user':
@@ -42,14 +76,25 @@ class TranscriptIndex:
                 execution = entry.get('execution') or {}
                 values.extend(execution[k] for k in ('tool', 'arguments', 'partial_input', 'status',
                               'output', 'error', 'metadata', 'start_label', 'end_label') if k in execution)
-                records.append((entry, category(entry), '\n'.join(map(safe_text, values)).casefold()))
+                facets = filter_values(entry)
+                turn_values.update(facets)
+                records.append((entry, facets, '\n'.join(map(safe_text, values)).casefold()))
             self.turns.append((turn['title'], records))
+            self.turn_filters.append(self._choices(turn_values))
+            all_values.update(turn_values)
+        self.filters = self._choices(all_values)
 
-    def matches(self, query, kind, turn_index=None):
+    @staticmethod
+    def _choices(values):
+        return (ALL_ENTRIES, *sorted(values, key=lambda v: (':' in v, v.casefold(), v)))
+
+    def matches(self, query, kind, turn_index=None, *, cancelled=None):
         terms = query.casefold().split()
         indices = range(len(self.turns)) if turn_index is None else (turn_index,)
         for index in indices:
             title, records = self.turns[index]
-            for entry, category_name, text in records:
-                if (kind == ENTRY_TYPES[0] or category_name == kind) and all(t in text for t in terms):
+            for entry, facets, text in records:
+                if cancelled is not None and cancelled.is_set():
+                    return
+                if (kind == ALL_ENTRIES or kind in facets) and all(t in text for t in terms):
                     yield index, title, entry

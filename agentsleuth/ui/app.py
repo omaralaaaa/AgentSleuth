@@ -1,6 +1,7 @@
 """Application entry point and Tk root initialization."""
 
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 import tkinter as tk
 from tkinter import ttk
 
@@ -9,6 +10,7 @@ from ..parsers import antigravity, claude, codex, opencode
 from .controller import ControllerMixin
 from .conversation import ConversationMixin
 from .worker import AgentWorker
+from .discovery import ScanDialog
 
 
 class AgentPane(LayoutMixin, ControllerMixin, ConversationMixin, tk.Frame):
@@ -34,11 +36,16 @@ class AgentPane(LayoutMixin, ControllerMixin, ConversationMixin, tk.Frame):
         self._working = False
         self._loading = False
         self._render_timer = None
+        self._render_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f'{parser.name}-render')
+        self._plan_cancel = self._plan_future = None
+        self._command_styles = {}
         self._row_cache = {}
         self._build()
         self._poll_timer = self.after(100, self._poll)
 
     def destroy(self):
+        self._cancel_render()
+        self._render_pool.shutdown(wait=False, cancel_futures=True)
         self.worker.close()
         for timer in (self._filter_timer, self._search_timer, self._layout_timer,
                       self._render_timer, self._poll_timer):
@@ -70,6 +77,12 @@ class App(LayoutMixin, tk.Tk):
         self.antigravity = AgentPane(self.tabs, antigravity_parser)
         self.tabs.add(self.antigravity, text=antigravity_parser.name)
         self.bind('<Control-f>', self._focus_search)
+
+    def open_scanner(self):
+        if getattr(self, 'scanner', None) is None or not self.scanner.winfo_exists():
+            self.scanner = ScanDialog(self)
+        self.scanner.lift()
+        self.scanner.focus_set()
 
     def _focus_search(self, _event):
         self.nametowidget(self.tabs.select()).search_entry.focus_set()

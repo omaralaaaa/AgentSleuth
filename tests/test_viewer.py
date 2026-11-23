@@ -5,12 +5,58 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from agentsleuth.ui.app import App
 from agentsleuth.ui.powershell import insert_command, is_powershell
+from agentsleuth.ui.render_plan import build_plan
+
+
+def wait_render(pane):
+    deadline = time.monotonic() + 5
+    while pane._render_timer is not None and time.monotonic() < deadline:
+        pane.update()
+        time.sleep(.005)
+    if pane._render_timer is not None:
+        raise AssertionError('Render did not finish')
 
 
 class ViewerTest(unittest.TestCase):
+    def test_slow_render_plan_is_replaced_while_tk_stays_responsive(self):
+        try:
+            root = App()
+        except tk.TclError as error:
+            self.skipTest(str(error))
+        self.addCleanup(root.destroy)
+        root.withdraw()
+        pane = root.codex
+        started, release = threading.Event(), threading.Event()
+        threads = []
+        def delayed(*args):
+            threads.append(threading.get_ident())
+            if len(threads) == 1:
+                started.set()
+                release.wait(5)
+            return build_plan(*args)
+        entry = dict(kind='message', role='user', ordinal=1, text='first request')
+        pane.result = dict(turns=[dict(title='Example', entries=[entry])],
+                           summary=dict(turns=1, activities=0))
+        with patch('agentsleuth.ui.conversation.build_plan', side_effect=delayed):
+            pane._after_reconstruct()
+            try:
+                self.assertTrue(started.wait(2))
+                pane.entry_type.set('Commands')
+                pane._render()
+                heartbeat = []
+                pane.after_idle(lambda: heartbeat.append(True))
+                pane.update()
+                self.assertEqual(heartbeat, [True])
+            finally:
+                release.set()
+            wait_render(pane)
+        self.assertTrue(all(t != threading.get_ident() for t in threads))
+        self.assertEqual(set(pane._row_cache), {'empty'})
+
     def test_prompt_folds_only_its_replies_and_tools(self):
         try:
             root = App()
@@ -28,6 +74,7 @@ class ViewerTest(unittest.TestCase):
                           summary=dict(turns=1, activities=1, attachments=0, recovered_files=0,
                                        max_ordinal=5), output_directory='.')
         app._after_reconstruct()
+        wait_render(app)
         app.update()
         def button_under(widget):
             if widget.winfo_class() == 'TButton':
@@ -38,15 +85,18 @@ class ViewerTest(unittest.TestCase):
                     return button
         button = button_under(app._row_cache[id(first)][1])
         button.invoke()
+        wait_render(app)
         def visible(entry):
             return app._row_cache[id(entry)] in app._rows
         self.assertEqual([visible(e) for e in (first, reply, tool, second, later)],
                          [True, False, False, True, True])
         app.entry_type.set('Tool calls')
         app._render()
+        wait_render(app)
         self.assertTrue(visible(first))
         self.assertFalse(visible(tool))
         button.invoke()
+        wait_render(app)
         self.assertTrue(visible(tool))
         self.assertTrue(visible(first))
         self.assertFalse(visible(second))
@@ -58,7 +108,25 @@ class ViewerTest(unittest.TestCase):
         self.assertGreater(card_left(tool), card_left(first))
         app.entry_type.set('All entries')
         app._render()
+        wait_render(app)
         self.assertTrue(all(visible(e) for e in (first, reply, tool, second, later)))
+        button.invoke()
+        app.view_buttons['Conversation'].invoke()
+        wait_render(app)
+        self.assertTrue(all(visible(e) for e in (first, reply, tool, second, later)))
+        self.assertIsNone(button_under(app._row_cache[id(first)][1]))
+        self.assertEqual([app._row_cache[id(e)] for e in (first, reply, tool, second, later)], app._rows)
+        app.entry_type.set('Tool calls')
+        app._render()
+        wait_render(app)
+        self.assertEqual(app._rows, [app._row_cache[id(tool)]])
+        app.view_buttons['Tree'].invoke()
+        wait_render(app)
+        self.assertEqual(app.entry_type.get(), 'Tool calls')
+        self.assertTrue(visible(first))
+        self.assertIn(id(first), app._collapsed_prompts)
+        self.assertNotIn(id(tool), app._row_cache)
+        self.assertEqual(root.opencode.view_mode, 'Tree')
 
     def test_powershell_highlighting_preserves_command_text(self):
         command = "Get-Item -Path $target | Select-Object 'Name' # café"
