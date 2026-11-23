@@ -255,10 +255,10 @@ class ConversationMixin:
         header = tk.Frame(card, bg=bg)
         header.pack(fill='x', padx=13, pady=(10, 2))
         if entry.get('event_type') == 'assistant_error' and entry.get('agent') in ('opencode', 'claude'):
-            label = 'ASSISTANT ERROR'
+            label = 'AGENT ERROR'
         elif is_message:
-            assistant = 'ASSISTANT' if entry.get('agent') == 'claude' else self.parser.name.upper()
-            label = 'USER' if user else assistant + (' · ' + entry['phase'] if entry.get('phase') else '')
+            speaker = 'AGENT' if entry.get('agent') == 'claude' else self.parser.name.upper()
+            label = 'USER' if user else speaker + (' · ' + entry['phase'] if entry.get('phase') else '')
         elif entry.get('agent') == 'claude' and 'execution' in entry:
             label = 'EXECUTION · ' + (entry['execution']['tool'] or 'TOOL')[:48].upper()
         else:

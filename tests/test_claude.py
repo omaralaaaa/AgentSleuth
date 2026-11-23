@@ -356,7 +356,7 @@ class ClaudeViewerTest(unittest.TestCase):
             widgets = list(descendants(pane.canvas))
             labels = [widget for widget in widgets if isinstance(widget, tk.Label)]
             strings = [widget.cget('text') for widget in labels]
-            self.assertTrue({'USER', 'ASSISTANT', 'EXECUTION · WRITE', 'ASSISTANT ERROR'}.issubset(strings))
+            self.assertTrue({'USER', 'AGENT', 'EXECUTION · WRITE', 'AGENT ERROR'}.issubset(strings))
             self.assertFalse(any('Call ID' in text or 'call-write' in text or 'MESSAGE EVIDENCE' in text
                                  for text in strings))
             self.assertFalse(any(text.startswith(('Started:', 'Ended:')) or text == 'Metadata'

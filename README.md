@@ -1,6 +1,6 @@
 # AgentSleuth
 
-AgentSleuth is a local desktop viewer for investigating conversations recorded by coding agents. Open an evidence source, select a session, and follow each user prompt through the assistant's replies, tool calls, recorded output, and file changes. A separate tab handles each agent's storage format.
+AgentSleuth is a local desktop viewer for investigating conversations recorded by coding agents. Open an evidence source, select a session, and follow each user prompt through the agent's replies, tool calls, recorded output, and file changes. A separate tab handles each agent's storage format.
 
 ## Run the viewer
 

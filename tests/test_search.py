@@ -18,7 +18,7 @@ class RecordedFilterTests(unittest.TestCase):
         index = TranscriptIndex([dict(title='First', entries=entries[:3]),
                                  dict(title='Second', entries=entries[3:])])
         for choice, positions in [('Commands', [0]), ('Status: error', [0]), ('Errors', [1]),
-                                  ('Attachments', [2]), ('Tool: lookup', [3]), ('Tool: view_file', [4]),
+                                  ('Agent messages', [1]), ('Attachments', [2]), ('Tool: lookup', [3]), ('Tool: view_file', [4]),
                                   ('Type: LIST_DIRECTORY', [5]), ('Status: 0', [5]), ('File changes', [6])]:
             with self.subTest(choice=choice):
                 self.assertIn(choice, index.filters)

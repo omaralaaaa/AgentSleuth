@@ -15,7 +15,7 @@ def filter_values(entry):
     values = set()
     if entry.get('kind') == 'message':
         role = entry.get('role')
-        values.add({'user': 'User messages', 'assistant': 'Assistant messages'}.get(role, 'Messages'))
+        values.add({'user': 'User messages', 'assistant': 'Agent messages'}.get(role, 'Messages'))
         if event == 'assistant_error':
             values.add('Errors')
     elif activity == 'ToolExecution' or activity.endswith('ToolCall'):

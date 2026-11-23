@@ -460,7 +460,7 @@ class OpenCodeViewerTest(unittest.TestCase):
         call_ids = {entry['call_id'] for entry in rendered if 'execution' in entry and entry['call_id']}
         self.assertEqual(call_ids, {'bash-call', 'read-call'})
         self.assertFalse(any(call_id in label for call_id in call_ids for label in labels))
-        self.assertEqual(labels.count('ASSISTANT ERROR'), 1)
+        self.assertEqual(labels.count('AGENT ERROR'), 1)
         self.assertNotIn('MESSAGE EVIDENCE', labels)
         error_entry, = (entry for entry in rendered if entry['event_type'] == 'assistant_error')
         error_card = pane._row_cache[id(error_entry)][1]

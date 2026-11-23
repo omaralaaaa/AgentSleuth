@@ -9,6 +9,29 @@ from agentsleuth.parsers import antigravity as provider
 
 
 class AntigravityTests(unittest.TestCase):
+    def test_user_request_is_displayed_without_generated_metadata(self):
+        prompt = 'Read C:\\case\\notes\n  Keep <tags> and indentation.'
+        plain = '<USER_REQUEST>\n' + prompt + '\n</USER_REQUEST>'
+        metadata = '<ADDITIONAL_METADATA>\nRecorded time\n</ADDITIONAL_METADATA>'
+        settings = '<USER_SETTINGS_CHANGE>\nRecorded setting\n</USER_SETTINGS_CHANGE>'
+        wrapped = '\n'.join((plain, metadata, settings))
+        escaped = '\\<USER_REQUEST>\\\n' + prompt + '\\\n\\</USER_REQUEST>\\\n\\' + metadata
+        cases = [('USER_INPUT', wrapped, prompt), ('USER_INPUT', escaped, prompt),
+                 ('USER_INPUT', prompt, prompt), ('PLANNER_RESPONSE', wrapped, wrapped),
+                 ('USER_INPUT', '<USER_REQUEST>incomplete', '<USER_REQUEST>incomplete')]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'transcript.jsonl'
+            for kind, original, expected in cases:
+                with self.subTest(kind=kind, original=original):
+                    path.write_text(json.dumps(dict(type=kind, content=original)), encoding='utf-8')
+                    result = provider.reconstruct_from_thread(path, provider.load_threads(path)[0])
+                    turn = result['turns'][0]
+                    entry = turn['entries'][0]
+                    self.assertEqual(entry['text'], expected)
+                    if expected != original:
+                        self.assertEqual(entry['raw_content'], original)
+                        self.assertNotIn('USER_REQUEST', turn['title'])
+
     def test_index_transcript_and_metadata_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

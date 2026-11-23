@@ -95,6 +95,13 @@ def _records(path):
                            content=f"Recorded step type {row['step_type']} · status {row['status']}")
 
 
+_USER_REQUEST = re.compile(
+    r'\A\s*\\?<USER_REQUEST>\\?(?:\r?\n)?(?P<request>.*?)'
+    r'(?:\\?\r?\n)?\\?</USER_REQUEST>(?=\\?\s*(?:\Z|\\?<(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>))',
+    re.DOTALL,
+)
+
+
 def reconstruct_from_thread(path, thread, output_root=None, progress=None):
     path = Path(path).resolve()
     source = path
@@ -119,7 +126,10 @@ def reconstruct_from_thread(path, thread, output_root=None, progress=None):
                     timestamp=safe_text(step.get('created_at')), step_index=step.get('step_index'),
                     status=step.get('status'), truncated_fields=step.get('truncated_fields'))
         entries = []
-        if kind in ('USER_INPUT', 'PLANNER_RESPONSE') and content:
+        if kind == 'USER_INPUT' and (wrapped := _USER_REQUEST.match(content)):
+            base['raw_content'] = content
+            content = wrapped['request']
+        if kind in ('USER_INPUT', 'PLANNER_RESPONSE') and (content or 'raw_content' in base):
             entries.append(dict(base, kind='message', role='user' if kind == 'USER_INPUT' else 'assistant',
                                 text=content))
             messages += 1
