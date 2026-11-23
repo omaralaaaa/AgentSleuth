@@ -310,7 +310,7 @@ class ClaudeViewerTest(unittest.TestCase):
         pane = root.claude
         root.tabs.select(pane)
         self.assertEqual([root.tabs.tab(tab, 'text') for tab in root.tabs.tabs()],
-                         ['Codex', 'OpenCode', 'Claude Code'])
+                         ['Codex', 'OpenCode', 'Claude Code', 'Antigravity'])
         self.assertEqual(len({root.codex.worker, root.opencode.worker, pane.worker}), 3)
         root.codex.result, root.opencode.result = {'codex': True}, {'opencode': True}
         worker_ids = []

@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 import sqlite3
 import tempfile
@@ -105,6 +107,40 @@ class OpenCodeTest(unittest.TestCase):
             with self.assertRaisesRegex(sqlite3.OperationalError, 'readonly'):
                 connection.execute('UPDATE session SET title = ?', ('unexpected',))
         self.parse()
+        self.assertEqual(self.db.read_bytes(), before)
+
+    def test_uploaded_files_extract_and_link_to_their_message(self):
+        binary = bytes(range(256))
+        encoded = base64.b64encode(binary).decode()
+        uploads = {
+            'embedded': dict(filename='../sample.pdf', mime='application/pdf',
+                             url='data:application/pdf;base64,' + encoded),
+            'text-file': dict(filename='sample.txt', url='data:text/plain;charset=utf-8,caf%C3%A9+%0A'),
+            'bad-file': dict(filename='broken.bin', url='data:application/octet-stream;base64,?!'),
+            'external': dict(url='https://example.invalid/remote%20name.png'),
+        }
+        with closing(sqlite3.connect(self.db)) as db, db:
+            for key, fields in uploads.items():
+                db.execute('INSERT INTO part VALUES (?, ?, ?, ?, ?, ?, ?)',
+                           (key, 'z-prompt', 'session', 3, 3, json.dumps(dict(type='file', **fields)), None))
+        before = self.db.read_bytes()
+        root = self.db.parent / 'results'
+        result = opencode.reconstruct_from_thread(self.db, opencode.load_threads(self.db)[0], root)
+        entries = result['turns'][0]['entries']
+        prompt = next(e for e in entries if e['event_type'] == 'user_prompt')
+        files = {a['part_id']: a for a in prompt['file_links']}
+        self.assertEqual(set(files), set(uploads) | {'attachment'})
+        self.assertEqual(files['embedded']['filename'], 'sample.pdf')
+        self.assertEqual(files['embedded']['sha256'], hashlib.sha256(binary).hexdigest())
+        target = Path(files['embedded']['saved_path'])
+        self.assertTrue(target.resolve().is_relative_to(root.resolve()))
+        self.assertEqual(target.read_bytes(), binary)
+        self.assertEqual(Path(files['text-file']['saved_path']).read_bytes(), 'café+\n'.encode())
+        self.assertEqual(files['external']['filename'], 'remote name.png')
+        for key in ('attachment', 'external', 'bad-file'):
+            self.assertIsNone(files[key]['saved_path'])
+        self.assertEqual(result['summary']['attachments'], 2)
+        self.assertEqual(result['attachment_failures'][0]['part_id'], 'bad-file')
         self.assertEqual(self.db.read_bytes(), before)
 
     def test_message_and_part_order_and_relationships(self):

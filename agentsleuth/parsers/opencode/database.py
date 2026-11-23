@@ -51,6 +51,7 @@ def load_threads(path: Path):
             ident = fields['id']
             sessions.append({
                 'id': ident,
+                'source_detail': f'Session ID  {ident}',
                 'name': str(fields.get('title') or '').strip() or f'Unnamed conversation ({ident})',
                 'cwd': str(fields.get('directory') or ''),
                 'time_created': fields.get('time_created'),

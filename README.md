@@ -1,76 +1,85 @@
-# AgentSleuth — Modular Edition v0.2.2
+# AgentSleuth
 
-AgentSleuth reconstructs conversations from three forensic sources in a Tkinter viewer.
+AgentSleuth is a local desktop viewer for investigating conversations recorded by coding agents. Open an evidence source, select a session, and follow each user prompt through the assistant's replies, tool calls, recorded output, and file changes. A separate tab handles each agent's storage format.
 
-- **Codex** uses `state_5.sqlite` to find conversations and reconstructs them from their JSONL rollouts. Recorded attachments and recoverable file changes are saved to the selected output folder.
-- **OpenCode** uses `opencode.db` to reconstruct sessions from the SQLite `session`, `message`, and `part` tables. It shows prompts, responses, tool executions, file references, patches, and other recorded parts. The parser skips `step-start`, `reasoning`, and `step-finish` Parts.
-- **Claude Code** groups entries in `history.jsonl` by session ID and reconstructs selected sessions from the adjacent `projects` directory. Its sidebar shows the project path, recorded history times, and transcript availability.
+## Run the viewer
 
-## Run
+Install Python 3.10 or newer with Tkinter. AgentSleuth uses the Python standard library. From a terminal:
 
-Use Python 3.10 or newer with Tkinter installed. AgentSleuth uses the Python standard library.
-
-```bash
+```shell
+git clone https://github.com/omaralaaaa/AgentSleuth.git
+cd AgentSleuth
 python main.py
 ```
 
-Choose the agent tab and load its evidence source. Select a conversation in the sidebar to reconstruct it. Each tab has its own worker, source, transcript cache, and view state. For Claude Code, select `history.jsonl` from the evidence directory containing `projects`.
+Cloning requires access to the repository. If you already have a checkout, run the last command from its root. To check whether your Python installation includes Tk, run `python -m tkinter`; a small test window should open.
 
-## Project layout
+## Choose the evidence source
 
-```text
-agentsleuth/
-    core/            Shared text, formatting and filesystem helpers
-    parsers/
-        codex/       SQLite discovery, JSONL events, attachments and recovery
-        opencode/    SQLite schema inspection, session discovery and timeline reconstruction
-        claude/      History discovery, JSONL reconstruction, tool correlation and file recovery
-    ui/              Desktop layout, background controller and transcript viewer
-tests/               Parser fixtures, reconstruction tests and GUI regressions
-main.py              Python launcher
-script.py            Alternate Python launcher
-```
+| Tab | File to open | What to keep alongside it |
+| --- | --- | --- |
+| Codex | `state_5.sqlite` | The session rollout JSONL files referenced by the database. Preserve their `sessions/` directory structure when copying evidence. |
+| OpenCode | `opencode.db` | Sessions, messages, file parts and tool state are in SQLite. Embedded uploads can be recovered from the database itself. |
+| Claude Code | `history.jsonl` | The sibling `projects/` tree contains session transcripts. Keep `file-history/` if you need available file snapshots. |
+| Antigravity | `conversation_summaries.db` | Keep the sibling `brain/` and `conversations/` trees. You can also open a generated `transcript.jsonl` or an individual trajectory `.db` directly. |
 
-### Adding an evidence parser
+For SQLite evidence, use a consistent snapshot. Recent records may still be in a database's `-wal` file. Copying only the main database from a running application can produce an incomplete timeline.
 
-Create a sibling package under `agentsleuth/parsers/`. Its public module should
-expose `name`, `source_label`, `source_hint`, `filetypes`, `load_threads(path)` and
-`reconstruct_from_thread(path, thread, output_root, progress)`. The desktop app
-accepts providers via `App(parser=codex_provider, opencode_parser=opencode_provider, claude_parser=claude_provider)`.
-The shared viewer uses conversation dictionaries with an ID, display name and
-working directory, plus reconstruction dictionaries with turns, ordered events
-and a summary. A provider can set `uses_output_directory = False` to hide the
-extracted-files control.
+## Investigate a conversation
 
-## Tests
+1. Select an agent tab and browse to its source file. Use **Load conversations** after entering a path manually.
+2. For providers that extract files, choose the results folder before opening the session. The default is `AgentSleuth_Results/` under the checkout.
+3. Select a conversation in the sidebar. The sidebar filter searches conversation names, working directories, and IDs. Each tab loads and caches its own sessions.
+4. Press **Ctrl+F** to search the selected transcript. Terms are case-insensitive and can appear in any order. Combine the query with the turn selector or an entry type such as **Commands**, **File changes**, or **Tool calls**. A matching reply retains its parent prompt for context.
+5. Use the disclosure button beneath a prompt to collapse its responses. Long text blocks scroll independently; scrolling at the edge continues through the transcript. Click an extracted filename to reveal its copy in the file manager.
 
-From this folder:
+## Interpret the results
 
-```bash
+### Codex
+
+AgentSleuth reads the SQLite thread list and reconstructs selected messages and activities from rollout records. Each user prompt displays the permission settings recorded in its turn context, or **Not recorded** when those settings are missing. Execution cards show recorded commands and output; PowerShell commands use syntax highlighting.
+
+Tool-call IDs, turn boundaries, ordinal ranges and command matches help correlate activity. A correlation note identifies inferred relationships. File-change recovery and attachment extraction use bytes or content present in the rollout.
+
+### OpenCode
+
+The parser links parts to their source messages, orders records by recorded sequence when available, and uses timestamps and IDs for fallback ordering. Repeated snapshots of a tool call within one message contribute to one execution card. Step boundaries and reasoning parts are omitted from the displayed timeline.
+
+Embedded file-part uploads produce copies under `OpenCode/<session-hash>/attachments/` in the results folder. The file card shows MIME type, byte count and SHA-256. A path or remote URL without embedded bytes remains a reference. A decoding error stays associated with its file.
+
+### Claude Code
+
+The history index provides session discovery. The parser resolves the matching project transcript, preserves line order, and correlates tool uses and results within their branch. Sidechain records are tracked separately. Extracted evidence goes under `Claude/<session-id>/` in the results folder. Proposed writes and recovered backup copies are labeled according to the available evidence.
+
+### Antigravity
+
+On the inspected Windows installation, the index is under `%USERPROFILE%\.gemini\antigravity\`. AgentSleuth resolves companion files relative to the **selected** evidence tree, so copied evidence can be investigated on another machine.
+
+| Available session evidence | What the viewer can recover |
+| --- | --- |
+| `brain/<session-id>/.system_generated/logs/transcript.jsonl` | User prompts, planner replies, tool requests, recorded step output and errors. Each step retains its source index when available. Truncation markers identify incomplete source fields. |
+| `conversations/<session-id>.db` with a `steps` table | Ordered step indexes and recorded numeric type/status values. Binary step payloads are not decoded. |
+| Summary index only | Session title and recorded workspace. Selecting the session explains why transcript content is unavailable. |
+
+Generated JSONL takes precedence over SQLite step metadata. Requests and result steps remain separate when the transcript provides no matching call ID. Standalone legacy `.pb` conversations are unsupported.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| A session is listed but its transcript is missing | Check the companion paths in the source table. An index can survive after its detailed records have been moved or removed. |
+| A file is visible but has no clickable copy | Inspect its status. Reference-only records contain no embedded bytes; invalid or oversized payloads may fail extraction. |
+| A newly recorded event is missing | Refresh your evidence snapshot, then reload the source to clear that tab's session cache. |
+| The viewer starts but a search looks empty | Use **Clear** to reset the query and type filter, then select **Entire conversation** to search all turns. |
+
+## Development
+
+Run the regression suite from the repository root. GUI tests need a Python installation with Tk and a usable display.
+
+```shell
 python -m unittest discover -s tests -v
 ```
 
-## Current GUI behavior
+The [provider packages](agentsleuth/parsers/) handle evidence discovery and reconstruction. [Shared core code](agentsleuth/core/) handles search, paths and artifact storage. The [Tkinter viewer](agentsleuth/ui/) runs reconstruction on per-tab background workers.
 
-- Loading an evidence source lists its conversations. Reconstruction starts when a conversation is selected.
-- Each user prompt shows permission metadata from its rollout turn context. Missing turn permissions are labeled “Not recorded.” The SQLite thread summary is never substituted for a prompt's permissions.
-- Mouse-wheel scrolling works anywhere over the conversation pane, including message cards and nested text widgets.
-- The transcript scrolls continuously. Long message bodies and execution outputs have a capped visible height and their own scrollbar. Wheel scrolling continues in the outer transcript when an inner block reaches its edge.
-- Tool-call and tool-output records are parsed and correlated internally using `call_id`, turn boundaries, ordinal ranges and command matching, but are not rendered as separate cards. This avoids duplicate content and reduces UI rendering cost.
-- The conversation summary displays the number of visible activities rather than hidden tool-call records.
-- Matched `CommandExecution`, `FileChange`, MCP and other supported activity records are rendered as standalone activity cards; command and aggregated output remain visible in the execution card.
-- An OpenCode tool call is displayed as one execution with the recorded input, output, error and status when available. Repeated snapshots with the same call ID within one message share a card and retain their original rows in the reconstruction result.
-- Claude Code preserves transcript line order and correlates executions by tool-use ID within each branch. It retains sidechain and subagent records separately from the primary transcript.
-- A rendering failure in one record is isolated to that record and does not prevent later conversation entries from rendering.
-- Attachment and recovered-file links point to AgentSleuth's extracted/rebuilt copies. Historical source paths from the rollout are not used as link targets.
-- Clicking a file link reveals its location in the system file manager; the file itself is not launched.
-
-## Evidence handling notes
-
-- SQLite is opened with `mode=ro` and `PRAGMA query_only=ON`.
-- The OpenCode parser uses only the selected SQLite database. It follows the message-to-part relationship and orders each level by recorded sequence when available, with timestamps and IDs for the fallback order. Reconstructed records retain the source IDs and raw values.
-- Claude Code copies recoverable files and embedded attachments to `Claude/<session-id>/` under the results directory. Unconfirmed writes are labeled as proposed. Snapshot copies identify the linked backup source under `file-history`.
-- Rollout JSONL and source attachments are read, not executed.
-- Embedded attachments are decoded only from recognized Base64 fields/data URIs and are written under the selected results directory.
-- FileChange recovery only writes content explicitly present in the log. It does not claim to reproduce bytes that were never recorded.
-- Tool-call/activity links may be inferred from the rollout event sequence and command matching; they are not treated as direct parent-ID proof unless the log contains an explicit link.
+To add a provider, implement `load_threads(path)` and `reconstruct_from_thread(path, thread, output_root, progress)`. Return a thread ID, display name and working directory for discovery, and ordered turns, entries and a summary for rendering. Register the provider in [the desktop app](agentsleuth/ui/app.py) and add fixtures and regression tests under [tests/](tests/).

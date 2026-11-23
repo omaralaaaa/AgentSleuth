@@ -242,7 +242,7 @@ class ConversationMixin:
                 'CollabAgentToolCall': 'EXECUTION · COLLAB AGENT',
                 'ToolExecution': 'EXECUTION · TOOL',
                 'reasoning': 'RECORDED REASONING',
-                'file_attachment': 'FILE ATTACHMENT REFERENCE',
+                'file_attachment': 'FILE ATTACHMENT',
                 'file_change': 'FILE CHANGE ARTIFACT',
                 'raw_part': 'PART EVIDENCE',
                 'raw_message': 'MESSAGE EVIDENCE',
@@ -260,6 +260,10 @@ class ConversationMixin:
             timestamp = recorded[:19].replace('T', ' ') + ' UTC' if recorded else ''
         meta = f'#{entry["ordinal"]}' + (f'  ·  {timestamp}' if timestamp else '')
         self._label(header, meta, self.DIM, ('Consolas', 8)).pack(side='right')
+        if entry.get('agent') == 'antigravity':
+            self._field(card, 'Recorded step', entry.get('step_index'))
+            if entry.get('truncated_fields'):
+                self._field(card, 'Truncated in source', safe_text(entry['truncated_fields']))
         key = id(entry)
         count = self._index.response_counts.get(key, 0)
         if user and 'permissions' in entry:
@@ -271,6 +275,12 @@ class ConversationMixin:
             self._file_links(card, entry.get('file_refs', []), entry.get('attachments', []))
         elif 'execution' in entry:
             self._render_execution(card, entry)
+        elif entry.get('event_type') == 'file_attachment' and entry.get('attachments'):
+            upload = entry['attachments'][0]
+            self._field(card, 'MIME type', upload.get('mime'))
+            self._field(card, 'Bytes', upload.get('size_bytes'))
+            self._field(card, 'SHA-256', upload.get('sha256'))
+            self._field(card, 'Extraction error', upload.get('error'))
         elif 'part_type' in entry:
             self._field(card, 'Part type', entry.get('part_type'))
             if 'text' in entry:
