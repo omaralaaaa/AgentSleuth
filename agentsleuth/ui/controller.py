@@ -83,7 +83,8 @@ class ControllerMixin:
             row_number = len(self.visible_index)
             self.conversations.insert(
                 '', 'end', iid=str(idx),
-                values=(f'{row_number:03d}', visible_names[-1]),
+                values=(f'{row_number:03d}', visible_names[-1],
+                        *(thread.get(key, '') for key, _, _ in self.sidebar_columns)),
                 tags=('odd' if row_number % 2 else 'even',)
             )
         # Keep long names available through the sidebar's horizontal scrollbar.
@@ -123,7 +124,8 @@ class ControllerMixin:
             return
         self.result = None
         self._section('Reconstructing selected conversation…')
-        source = 'rollout' if self.uses_output_directory else 'OpenCode evidence'
+        source = getattr(self.parser, 'transcript_label',
+                         'rollout' if self.uses_output_directory else 'OpenCode evidence')
         self.status.set(f'Reading {source} for {thread["name"]}')
         self._set_busy(True)
         self.worker.start('reconstructed', reconstruct, self.parser, self._loaded_db,
@@ -132,7 +134,9 @@ class ControllerMixin:
     def _display_header(self, thread):
         self.thread_title.configure(text=thread['name'])
         self.thread_cwd.configure(text='Working directory (cwd): ' + (thread['cwd'] or 'Unknown'))
-        if self.uses_output_directory:
+        if detail := thread.get('source_detail'):
+            self.thread_rollout.configure(text=detail)
+        elif self.uses_output_directory:
             self.thread_rollout.configure(text='Rollout: ' + (thread.get('rollout_path') or 'Not recorded'))
         else:
             self.thread_rollout.configure(text=f'Session ID  {thread["id"]}')
@@ -174,6 +178,8 @@ class ControllerMixin:
         if not self.result:
             return
         turns = self.result['turns']
+        if detail := self.result.get('source_detail'):
+            self.thread_rollout.configure(text=detail)
         self._clear_chat()
         self._index = self.result.get('_search_index') or TranscriptIndex(turns)
         self.turn_options.configure(values=['Entire conversation'] +

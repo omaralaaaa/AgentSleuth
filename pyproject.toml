@@ -1,7 +1,7 @@
 [project]
 name = "agentsleuth"
 version = "0.2.2"
-description = "Modular Codex and OpenCode conversation forensics viewer"
+description = "Modular Codex, OpenCode, and Claude Code conversation forensics viewer"
 requires-python = ">=3.10"
 dependencies = []
 

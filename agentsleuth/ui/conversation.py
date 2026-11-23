@@ -226,10 +226,13 @@ class ConversationMixin:
         card.pack(fill='x', expand=True, pady=(0 if user else 3, 0))
         header = tk.Frame(card, bg=bg)
         header.pack(fill='x', padx=13, pady=(10, 2))
-        if entry.get('agent') == 'opencode' and entry.get('event_type') == 'assistant_error':
+        if entry.get('event_type') == 'assistant_error' and entry.get('agent') in ('opencode', 'claude'):
             label = 'ASSISTANT ERROR'
         elif is_message:
-            label = 'USER' if user else self.parser.name.upper() + (' · ' + entry['phase'] if entry.get('phase') else '')
+            assistant = 'ASSISTANT' if entry.get('agent') == 'claude' else self.parser.name.upper()
+            label = 'USER' if user else assistant + (' · ' + entry['phase'] if entry.get('phase') else '')
+        elif entry.get('agent') == 'claude' and 'execution' in entry:
+            label = 'EXECUTION · ' + (entry['execution']['tool'] or 'TOOL')[:48].upper()
         else:
             activity_labels = {
                 'CommandExecution': 'EXECUTION · COMMAND',
@@ -276,6 +279,8 @@ class ConversationMixin:
                 self._field(card, 'Recorded evidence', entry['evidence'], multiline=True, show_empty=True)
         else:
             self._render_activity_fields(card, entry)
+        for file in entry.get('file_links', ()):
+            self._filename_link(card, file['filename'], file['saved_path'], file['suffix'])
         if user and count:
             def caption():
                 marker = '▸' if key in self._collapsed_prompts else '▾'
@@ -304,9 +309,10 @@ class ConversationMixin:
         self._field(panel, 'Recorded error', execution['error'], multiline=True, show_empty=True)
         status = execution['status']
         self._field(panel, 'Status', status if status is not None else 'Not recorded')
-        self._field(panel, 'Started', execution['start_label'])
-        self._field(panel, 'Ended', execution['end_label'])
-        self._field(panel, 'Metadata', execution['metadata'], multiline=True, show_empty=True)
+        if entry.get('agent') != 'claude':
+            self._field(panel, 'Started', execution['start_label'])
+            self._field(panel, 'Ended', execution['end_label'])
+            self._field(panel, 'Metadata', execution['metadata'], multiline=True, show_empty=True)
 
     def _render_activity_fields(self, panel, activity):
         kind = activity['activity_type']

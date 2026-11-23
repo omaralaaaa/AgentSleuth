@@ -110,14 +110,18 @@ class LayoutMixin:
         sidebar_wrap.pack(fill='both', expand=True)
         sidebar_wrap.grid_rowconfigure(0, weight=1)
         sidebar_wrap.grid_columnconfigure(0, weight=1)
+        self.sidebar_columns = getattr(self.parser, 'sidebar_columns', ())
         self.conversations = ttk.Treeview(
-            sidebar_wrap, columns=('number', 'name'), show='headings',
+            sidebar_wrap, columns=('number', 'name', *(key for key, _, _ in self.sidebar_columns)), show='headings',
             selectmode='browse', style='Conversations.Treeview'
         )
         self.conversations.heading('number', text='#', anchor='center')
         self.conversations.heading('name', text='Conversation', anchor='w')
         self.conversations.column('number', width=42, minwidth=42, stretch=False, anchor='center')
         self.conversations.column('name', width=225, minwidth=125, stretch=True, anchor='w')
+        for key, label, width in self.sidebar_columns:
+            self.conversations.heading(key, text=label, anchor='w')
+            self.conversations.column(key, width=width, minwidth=100, stretch=False, anchor='w')
         self.conversations.tag_configure('odd', background=self.PANEL)
         self.conversations.tag_configure('even', background='#282b30')
         sidebar_scroll = ttk.Scrollbar(sidebar_wrap, orient='vertical', command=self.conversations.yview)
@@ -128,7 +132,8 @@ class LayoutMixin:
         sidebar_scroll.grid(row=0, column=1, sticky='ns')
         sidebar_hscroll.grid(row=1, column=0, sticky='ew')
         self.conversations.bind('<<TreeviewSelect>>', self._select_thread)
-        self.sidebar_info = self._label(left, 'No database selected', self.DIM,
+        source_prompt = 'No source selected' if self.sidebar_columns else 'No database selected'
+        self.sidebar_info = self._label(left, source_prompt, self.DIM,
                                        ('Consolas', 9), justify='left', wraplength=280)
         self.sidebar_info.pack(anchor='w', pady=(10, 0))
 

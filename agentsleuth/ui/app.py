@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from .layout import LayoutMixin
-from ..parsers import codex, opencode
+from ..parsers import claude, codex, opencode
 from .controller import ControllerMixin
 from .conversation import ConversationMixin
 from .worker import AgentWorker
@@ -50,7 +50,7 @@ class AgentPane(LayoutMixin, ControllerMixin, ConversationMixin, tk.Frame):
 
 
 class App(LayoutMixin, tk.Tk):
-    def __init__(self, parser=codex, *, opencode_parser=opencode):
+    def __init__(self, parser=codex, *, opencode_parser=opencode, claude_parser=claude):
         super().__init__()
         self.title('AgentSleuth — Forensic Conversation Viewer')
         self.geometry('1390x830')
@@ -62,8 +62,10 @@ class App(LayoutMixin, tk.Tk):
         self.tabs.pack(fill='both', expand=True, padx=12, pady=(0, 8))
         self.codex = AgentPane(self.tabs, parser)
         self.opencode = AgentPane(self.tabs, opencode_parser)
+        self.claude = AgentPane(self.tabs, claude_parser)
         self.tabs.add(self.codex, text=parser.name)
         self.tabs.add(self.opencode, text=opencode_parser.name)
+        self.tabs.add(self.claude, text=claude_parser.name)
         self.bind('<Control-f>', self._focus_search)
 
     def _focus_search(self, _event):
