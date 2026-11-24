@@ -1,6 +1,7 @@
 """Qt desktop application."""
 
 import argparse
+import ctypes
 import os
 from pathlib import Path
 from queue import Empty
@@ -33,6 +34,7 @@ from .qt_transcript import Transcript, evidence_label
 
 
 PROVIDERS = (codex, opencode, claude, antigravity)
+LOGO_PATH = Path(__file__).with_name('assets') / 'agentsleuth-logo.png'
 THEME = """
 QWidget { background: #191b1f; color: #dee1e5; }
 QFrame#panel { background: #23262b; }
@@ -464,8 +466,6 @@ class Viewer(QMainWindow):
         except (OSError, RuntimeError, ValueError) as error:
             export_error = f'Could not validate export directory · {error}'
         self.setWindowTitle('AgentSleuth — Agent Conversation Viewer')
-        logo = QIcon(str(Path(__file__).with_name('assets') / 'agentsleuth-logo.png'))
-        self.setWindowIcon(logo)
         self.resize(1390, 830)
         self.setMinimumSize(900, 620)
         self.scanner = None
@@ -479,7 +479,7 @@ class Viewer(QMainWindow):
         heading = QHBoxLayout(masthead)
         heading.setContentsMargins(12, 6, 15, 6)
         mark = evidence_label('')
-        mark.setPixmap(logo.pixmap(QSize(40, 40), self.devicePixelRatioF()))
+        mark.setPixmap(self.windowIcon().pixmap(QSize(40, 40), self.devicePixelRatioF()))
         heading.addWidget(mark)
         heading.addWidget(evidence_label('AGENTSLEUTH', points=19, bold=True))
         heading.addStretch()
@@ -625,6 +625,7 @@ def benchmark(app, viewer, size):
 
 
 def configure_application(app):
+    app.setWindowIcon(QIcon(str(LOGO_PATH)))
     # Qt's Windows offscreen backend starts without a system font database.
     if sys.platform == 'win32' and app.platformName() == 'offscreen':
         fonts = Path(os.environ.get('WINDIR', r'C:\Windows')) / 'Fonts'
@@ -645,6 +646,9 @@ def main(script_path=None):
     args = parser.parse_args()
     if args.benchmark is not None and args.benchmark < 1:
         parser.error('--benchmark requires a positive row count')
+    if sys.platform == 'win32':
+        # Give the Windows taskbar a stable identity when launched through Python.
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('AgentSleuth.Viewer')
     app = QApplication([])
     configure_application(app)
     script_directory = Path(script_path).resolve().parent if script_path is not None else Path.cwd()
