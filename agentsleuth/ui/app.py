@@ -15,9 +15,10 @@ from .discovery import ScanDialog
 
 
 class AgentPane(LayoutMixin, ControllerMixin, ConversationMixin, tk.Frame):
-    def __init__(self, parent, parser, output_root):
+    def __init__(self, parent, parser, output_root, *, closable=False):
         super().__init__(parent, bg=self.BG)
         self.parser = parser
+        self.closable = closable
         self.uses_output_directory = getattr(parser, 'uses_output_directory', True)
         self.db_path = tk.StringVar(self)
         self.output_root = output_root if self.uses_output_directory else None
@@ -85,7 +86,7 @@ class App(LayoutMixin, tk.Tk):
         self.tabs.add(self.claude, text=claude_parser.name)
         self.antigravity = AgentPane(self.tabs, antigravity_parser, self.output_root)
         self.tabs.add(self.antigravity, text=antigravity_parser.name)
-        self._agent_panes = (self.codex, self.opencode, self.claude, self.antigravity)
+        self._agent_panes = [self.codex, self.opencode, self.claude, self.antigravity]
         if export_error:
             for pane in self._agent_panes:
                 if pane.uses_output_directory:
@@ -112,6 +113,45 @@ class App(LayoutMixin, tk.Tk):
             self.scanner = ScanDialog(self)
         self.scanner.lift()
         self.scanner.focus_set()
+
+    def open_evidence_sources(self, sources, evidence_root):
+        """Keep each scanned source and its evidence scope in a separate pane."""
+        opened = []
+        for hit in sources:
+            panes = [pane for pane in self._agent_panes if pane.parser.name == hit.agent]
+            if not panes:
+                continue
+            source = (hit.source, evidence_root)
+            existing = next((pane for pane in panes if getattr(pane, 'scan_source', None) == source
+                             and (pane.db_path.get() == str(hit.source) if pane._loading
+                                  else pane._loaded_db == hit.source)), None)
+            if existing is not None:
+                opened.append(existing)
+                continue
+
+            pane = next((pane for pane in panes if pane._loaded_db is None and not pane._loading), None)
+            if pane is None:
+                pane = AgentPane(self.tabs, panes[0].parser, self.output_root, closable=True)
+                label = f'{hit.agent} · {hit.path.name}'
+                current = {self.tabs.tab(tab, 'text') for tab in self.tabs.tabs()}
+                title = label
+                index = 2
+                while title in current:
+                    title = f'{label} ({index})'
+                    index += 1
+                self.tabs.add(pane, text=title)
+                self._agent_panes.append(pane)
+            pane.scan_source = source
+            pane.db_path.set(str(hit.source))
+            pane._load()
+            opened.append(pane)
+        if opened:
+            self.tabs.select(opened[0])
+        return bool(opened)
+
+    def close_source_tab(self, pane):
+        self._agent_panes.remove(pane)
+        pane.destroy()
 
     def _focus_search(self, _event):
         self.nametowidget(self.tabs.select()).search_entry.focus_set()

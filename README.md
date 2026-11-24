@@ -31,7 +31,7 @@ For SQLite evidence, use a consistent snapshot. Recent records may still be in a
 
 Click **Scan for artifacts…** above the agent tabs. **Scan this PC** checks known agent directories in accessible Windows user profiles. **Scan evidence folder…** searches beneath a directory you select, such as the top of a KAPE collection or its extracted C-drive folder. You can select the collection even when the user profiles are nested several levels down. Raw disk-image files must first be mounted or extracted.
 
-Each result represents one agent folder. Double-click a row or click **Open folder** to load its conversation list in the corresponding tab. The scanner resolves the index automatically, choosing the highest numbered Codex state database when several are present. Antigravity folders without an index can list sessions from generated transcripts and trajectory databases. Different users' folders remain separate. Scroll horizontally to inspect long paths.
+Each result represents one agent folder. Check the box next to each folder you want to open, then click **Open selected**. Double-click a folder name to open it individually. Each source loads its own conversation list. Multiple sources for the same agent open in separate tabs. The scanner resolves the index automatically, choosing the highest numbered Codex state database when several are present. Antigravity folders without an index can list sessions from generated transcripts and trajectory databases. Scroll horizontally to inspect long paths.
 
 ### Open a source manually
 

@@ -22,6 +22,42 @@ def wait_render(pane):
 
 
 class ViewerTest(unittest.TestCase):
+    def test_codex_command_card_hides_execution_metadata(self):
+        try:
+            root = App()
+        except tk.TclError as error:
+            if 'display' in str(error):
+                self.skipTest(str(error))
+            raise
+        self.addCleanup(root.destroy)
+        root.geometry('1000x700+10000+10000')
+        pane = root.codex
+        command = dict(agent='codex', kind='activity', activity_type='CommandExecution', ordinal=1,
+                       command='echo hello', item={'aggregated_output': 'hello'},
+                       status='completed', pid=22612, cwd='file:///workspace', exit_code=0)
+        file_change = dict(agent='codex', kind='activity', activity_type='FileChange', ordinal=2,
+                           status='completed', item={})
+        pane.result = dict(turns=[dict(title='Example', entries=[command, file_change])],
+                           summary=dict(turns=1, activities=2))
+        pane._after_reconstruct()
+        wait_render(pane)
+
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+
+        widgets = list(descendants(pane._row_cache[id(command)][1]))
+        labels = [widget.cget('text') for widget in widgets if isinstance(widget, tk.Label)]
+        self.assertFalse(any(label.startswith(('Status:', 'Process ID:', 'Working directory:', 'Exit code:'))
+                             for label in labels))
+        self.assertEqual([widget.get('1.0', 'end-1c') for widget in widgets if isinstance(widget, tk.Text)],
+                         ['echo hello', 'hello'])
+        self.assertEqual([command[key] for key in ('status', 'pid', 'cwd', 'exit_code')],
+                         ['completed', 22612, 'file:///workspace', 0])
+        self.assertIn('Status:  completed', [widget.cget('text') for widget in
+                      descendants(pane._row_cache[id(file_change)][1]) if isinstance(widget, tk.Label)])
+
     def test_slow_render_plan_is_replaced_while_tk_stays_responsive(self):
         try:
             root = App()

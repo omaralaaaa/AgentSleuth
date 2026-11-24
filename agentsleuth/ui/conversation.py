@@ -354,11 +354,14 @@ class ConversationMixin:
 
     def _render_activity_fields(self, panel, activity):
         kind = activity['activity_type']
-        self._field(panel, 'Status', activity.get('status'))
+        hide_command_metadata = kind == 'CommandExecution' and activity.get('agent') == 'codex'
+        if not hide_command_metadata:
+            self._field(panel, 'Status', activity.get('status'))
         if kind == 'CommandExecution':
-            self._field(panel, 'Process ID', activity.get('pid'))
-            self._field(panel, 'Working directory', activity.get('cwd'))
-            self._field(panel, 'Exit code', activity.get('exit_code'))
+            if not hide_command_metadata:
+                self._field(panel, 'Process ID', activity.get('pid'))
+                self._field(panel, 'Working directory', activity.get('cwd'))
+                self._field(panel, 'Exit code', activity.get('exit_code'))
             command = activity.get('command')
             self._field(panel, 'Shell command', command, multiline=True,
                         powershell=self._command_styles.pop(id(activity), None))

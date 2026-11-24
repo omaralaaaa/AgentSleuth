@@ -1,29 +1,44 @@
+import sqlite3
 import tempfile
 import threading
 import time
 import tkinter as tk
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from agentsleuth.core.discovery import scan
 from agentsleuth.parsers.codex.paths import rollout_for_thread
 from agentsleuth.ui.app import App
+from agentsleuth.ui.discovery import CHECKED, UNCHECKED
 
 
 class DiscoveryTests(unittest.TestCase):
-    def test_open_scanned_collection_source_in_matching_tab(self):
+    def _app(self):
         try:
             app = App()
         except tk.TclError as error:
-            self.skipTest(str(error))
+            if 'display' in str(error):
+                self.skipTest(str(error))
+            raise
         self.addCleanup(app.destroy)
         app.geometry('900x620+10000+10000')
-        def wait_until(predicate):
-            deadline = time.monotonic() + 5
-            while not predicate() and time.monotonic() < deadline:
-                app.update()
-                time.sleep(.01)
-            self.assertTrue(predicate())
+        return app
+
+    def _wait_until(self, app, predicate):
+        deadline = time.monotonic() + 5
+        while not predicate() and time.monotonic() < deadline:
+            app.update()
+            time.sleep(.01)
+        self.assertTrue(predicate())
+
+    def _click_checkbox(self, app, dialog, row):
+        x, y, width, height = dialog.table.bbox(row, 'check')
+        dialog.table.event_generate('<Button-1>', x=x + width // 2, y=y + height // 2)
+        app.update()
+
+    def test_open_scanned_collection_source_in_matching_tab(self):
+        app = self._app()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             path = root / 'C/Users/user/.gemini/antigravity/brain/s/.system_generated/logs/transcript.jsonl'
@@ -37,19 +52,93 @@ class DiscoveryTests(unittest.TestCase):
             dialog = app.scanner
             dialog.geometry('530x300+10000+10000')
             dialog.start(root)
-            wait_until(lambda: dialog.job is None)
+            self._wait_until(app, lambda: dialog.job is None)
             self.assertEqual([hit.path for hit in dialog.findings], [folder])
             self.assertTrue(dialog.open_button.winfo_ismapped())
             self.assertLess(dialog.table.xview()[1], 1)
+            self._click_checkbox(app, dialog, '0')
             dialog.open_button.invoke()
-            wait_until(lambda: app.antigravity._loaded_db == folder)
+            self._wait_until(app, lambda: app.antigravity._loaded_db == folder)
             self.assertEqual(app.tabs.select(), str(app.antigravity))
             self.assertEqual(app.antigravity.threads[0]['_evidence_root'], root)
             self.assertEqual([t['id'] for t in app.antigravity.threads], ['s', 't'])
             app.antigravity.conversations.selection_set('1')
             app.antigravity._select_thread()
-            wait_until(lambda: app.antigravity.result is not None)
+            self._wait_until(app, lambda: app.antigravity.result is not None)
             self.assertEqual(app.antigravity.result['turns'][0]['entries'][0]['text'], 'Another')
+
+    def test_open_selected_sources_keeps_duplicate_agent_sources_in_separate_tabs(self):
+        app = self._app()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            folders = [root / 'Users' / user / '.gemini/antigravity' for user in ('alice', 'bob')]
+            for folder, prompt in zip(folders, ('First profile', 'Second profile')):
+                transcript = folder / 'brain/session/.system_generated/logs/transcript.jsonl'
+                transcript.parent.mkdir(parents=True)
+                transcript.write_text(f'{{"type":"USER_INPUT","content":"{prompt}"}}\n', encoding='utf-8')
+            missing = root / 'Users/carol/.gemini/antigravity-ide'
+            missing.mkdir(parents=True)
+            database = root / 'Users/alice/.local/share/opencode/opencode.db'
+            database.parent.mkdir(parents=True)
+            with closing(sqlite3.connect(database)) as connection, connection:
+                connection.executescript("CREATE TABLE session (id TEXT, title TEXT);"
+                                         "INSERT INTO session VALUES ('session', 'OpenCode source');"
+                                         "CREATE TABLE message (id TEXT, session_id TEXT);"
+                                         "CREATE TABLE part (id TEXT, message_id TEXT);")
+
+            app.open_scanner()
+            dialog = app.scanner
+            dialog.start(root)
+            self._wait_until(app, lambda: dialog.job is None)
+            missing_row, = (str(index) for index, hit in enumerate(dialog.findings) if hit.path == missing)
+            app.update()
+            rows = [row for row in dialog.table.get_children() if row != missing_row]
+            self.assertEqual(dialog.table.selection(), ())
+            self.assertEqual([dialog.table.set(row, 'check') for row in rows], [UNCHECKED] * len(rows))
+            self.assertEqual(dialog.table.set(missing_row, 'check'), '')
+            self._click_checkbox(app, dialog, missing_row)
+            self.assertIn('disabled', dialog.open_button.state())
+            self._click_checkbox(app, dialog, rows[0])
+            self._click_checkbox(app, dialog, rows[1])
+            self.assertEqual(set(dialog.table.selection()), set(rows[:2]))
+            self._click_checkbox(app, dialog, rows[0])
+            self.assertEqual(dialog.table.set(rows[0], 'check'), UNCHECKED)
+            self._click_checkbox(app, dialog, rows[2])
+            self._click_checkbox(app, dialog, rows[0])
+            self.assertEqual(set(dialog.table.selection()), set(rows))
+            self.assertEqual([dialog.table.set(row, 'check') for row in rows], [CHECKED] * len(rows))
+            dialog.open_button.invoke()
+            panes = {Path(pane.db_path.get()): pane for pane in app._agent_panes if pane.db_path.get()}
+            self.assertEqual(set(panes), {*folders, database})
+            self._wait_until(app, lambda: all(pane._loaded_db == source for source, pane in panes.items()))
+            self.assertIs(panes[folders[0]], app.antigravity)
+            second = panes[folders[1]]
+            self.assertIsNot(second.worker, app.antigravity.worker)
+            self.assertIs(second.output_root, app.output_root)
+            self.assertIs(panes[database], app.opencode)
+            self.assertEqual(app.opencode.threads[0]['name'], 'OpenCode source')
+            for source in folders:
+                pane = panes[source]
+                self.assertEqual(pane.threads[0]['_evidence_root'], root)
+                self.assertIsNone(pane.result)
+                pane.conversations.selection_set('0')
+                pane._select_thread()
+            self._wait_until(app, lambda: all(panes[source].result is not None for source in folders))
+            self.assertEqual([panes[source].result['turns'][0]['entries'][0]['text'] for source in folders],
+                             ['First profile', 'Second profile'])
+
+            app.open_scanner()
+            reopened = app.scanner
+            reopened.start(root)
+            self._wait_until(app, lambda: reopened.job is None)
+            reopened._select_all()
+            requests = {pane: pane.worker.request for pane in panes.values()}
+            reopened.open_button.invoke()
+            self.assertEqual(len(app.tabs.tabs()), 5)
+            self.assertEqual({pane: pane.worker.request for pane in panes.values()}, requests)
+            app.close_source_tab(second)
+            self.assertNotIn(str(second), app.tabs.tabs())
+            self.assertNotIn(second, app._agent_panes)
 
     def test_collection_preserves_profiles_and_distinguishes_companions(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -86,6 +86,10 @@ class LayoutMixin:
         ttk.Button(db_row, text='Browse', command=self._browse_db).pack(side='left', padx=(7, 4))
         self.load_button = ttk.Button(db_row, text='Load conversations', style='Accent.TButton', command=self._load)
         self.load_button.pack(side='left')
+        if self.closable:
+            ttk.Button(db_row, text='Close tab', command=lambda: self.winfo_toplevel().close_source_tab(self)).pack(
+                side='left', padx=(6, 0)
+            )
         if self.uses_output_directory:
             out_row = tk.Frame(top, bg=self.BG)
             out_row.pack(fill='x', pady=(4, 4))
