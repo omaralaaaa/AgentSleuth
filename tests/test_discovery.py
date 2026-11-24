@@ -34,7 +34,8 @@ class DiscoveryTests(unittest.TestCase):
 
     def _click_checkbox(self, app, dialog, row):
         x, y, width, height = dialog.table.bbox(row, 'check')
-        dialog.table.event_generate('<Button-1>', x=x + width // 2, y=y + height // 2)
+        self._click_time = getattr(self, '_click_time', 0) + 1000
+        dialog.table.event_generate('<Button-1>', x=x + width // 2, y=y + height // 2, time=self._click_time)
         app.update()
 
     def test_open_scanned_collection_source_in_matching_tab(self):
@@ -88,12 +89,19 @@ class DiscoveryTests(unittest.TestCase):
 
             app.open_scanner()
             dialog = app.scanner
+            self.assertIn('disabled', dialog.select_all_button.state())
             dialog.start(root)
             self._wait_until(app, lambda: dialog.job is None)
             missing_row, = (str(index) for index, hit in enumerate(dialog.findings) if hit.path == missing)
             app.update()
-            rows = [row for row in dialog.table.get_children() if row != missing_row]
+            results = dialog.table.get_children()
+            self.assertEqual(len(results), len(dialog.findings))
+            rows = [row for row in results if row != missing_row]
             self.assertEqual(dialog.table.selection(), ())
+            select_all = dialog.select_all_button
+            self.assertLess(select_all.winfo_x(), dialog.open_button.winfo_x())
+            self.assertNotIn('disabled', select_all.state())
+            self.assertEqual(str(select_all.cget('text')), 'Select all')
             self.assertEqual([dialog.table.set(row, 'check') for row in rows], [UNCHECKED] * len(rows))
             self.assertEqual(dialog.table.set(missing_row, 'check'), '')
             self._click_checkbox(app, dialog, missing_row)
@@ -101,12 +109,18 @@ class DiscoveryTests(unittest.TestCase):
             self._click_checkbox(app, dialog, rows[0])
             self._click_checkbox(app, dialog, rows[1])
             self.assertEqual(set(dialog.table.selection()), set(rows[:2]))
+            self.assertEqual(str(select_all.cget('text')), 'Select all')
             self._click_checkbox(app, dialog, rows[0])
             self.assertEqual(dialog.table.set(rows[0], 'check'), UNCHECKED)
-            self._click_checkbox(app, dialog, rows[2])
-            self._click_checkbox(app, dialog, rows[0])
+            select_all.invoke()
             self.assertEqual(set(dialog.table.selection()), set(rows))
             self.assertEqual([dialog.table.set(row, 'check') for row in rows], [CHECKED] * len(rows))
+            self.assertEqual(str(select_all.cget('text')), 'Clear selection')
+            select_all.invoke()
+            self.assertEqual(dialog.table.selection(), ())
+            self.assertEqual(str(select_all.cget('text')), 'Select all')
+            self.assertIn('disabled', dialog.open_button.state())
+            select_all.invoke()
             dialog.open_button.invoke()
             panes = {Path(pane.db_path.get()): pane for pane in app._agent_panes if pane.db_path.get()}
             self.assertEqual(set(panes), {*folders, database})

@@ -39,9 +39,11 @@ class AttachmentExtractor:
             ext = ".bin"
         return ext
 
-    def _extract(self, encoded: str, mime: str, record: dict, field_path: str):
+    def _extract(self, encoded: str, mime: str, record: dict, field_path: str, original_filename=''):
         entry_id = len(self.entries) + len(self.failures) + 1
         marker = {"attachment_id": entry_id, "mime": mime, "source_field": field_path}
+        if original_filename:
+            marker["original_filename"] = original_filename
         # Prevent huge allocations; never dump the original base64 into results.
         encoded = re.sub(r"\s+", "", encoded)
         estimated = (len(encoded) * 3) // 4
@@ -62,7 +64,9 @@ class AttachmentExtractor:
             error = str(ex)
             self.failures.append({**marker, "error": error, "ordinal": record.get("ordinal")})
             return {"_embedded_attachment": {**marker, "status": "error", "reason": error}}
-        extension = self._extension(mime)
+        extension = ntpath.splitext(original_filename)[1]
+        if not re.fullmatch(r"\.[A-Za-z0-9]{1,12}", extension):
+            extension = self._extension(mime)
         filename = f"attachment_{entry_id:04d}{extension}"
         digest = hashlib.sha256(blob).hexdigest()
         file_path = write_session_artifact(
@@ -74,6 +78,7 @@ class AttachmentExtractor:
             **marker,
             "status": "extracted",
             "filename": file_path.name,
+            "saved_path": str(file_path),
             "size_bytes": len(blob),
             "sha256": digest,
             "ordinal": record.get("ordinal"),
@@ -83,10 +88,16 @@ class AttachmentExtractor:
         self.entries.append(result)
         return {"_embedded_attachment": result}
 
-    def sanitize(self, obj, record, path="record", parent_type="", key=""):
+    def sanitize(self, obj, record, path="record", parent_type="", key="", original_filename='', mime_hint=''):
         if isinstance(obj, dict):
             current_type = str(obj.get("type") or parent_type)
-            return {k: self.sanitize(v, record, f"{path}.{k}", current_type, k) for k, v in obj.items()}
+            name = obj.get("filename")
+            name = ntpath.basename(name) if isinstance(name, str) else ''
+            mime = obj.get("mime_type") or obj.get("mime")
+            mime = mime if isinstance(mime, str) else ''
+            return {k: self.sanitize(v, record, f"{path}.{k}", current_type, k,
+                                     name if k == "file_data" else '', mime if k == "file_data" else '')
+                    for k, v in obj.items()}
         if isinstance(obj, list):
             return [self.sanitize(v, record, f"{path}[{i}]", parent_type, key) for i, v in enumerate(obj)]
         if isinstance(obj, str):
@@ -95,20 +106,20 @@ class AttachmentExtractor:
                 found = DATA_URI.match(obj)
                 if found:
                     mime = found.group(1) or "application/octet-stream"
-                    return self._extract(found.group(2), mime, record, path)
+                    return self._extract(found.group(2), mime, record, path, original_filename)
             # A known *raw* base64 field, not arbitrary base64-looking text.
             is_audio_data = key == "data" and parent_type in {"input_audio", "audio"}
-            if (key in BASE64_FIELD_NAMES or is_audio_data) and len(obj) > 64:
+            if key == "file_data" or ((key in BASE64_FIELD_NAMES or is_audio_data) and len(obj) > 64):
                 # Do not misinterpret HTTPS URLs as data.
                 if obj.startswith(("http://", "https://", "file://")):
                     return obj
                 if re.fullmatch(r"[A-Za-z0-9+/=_\-\s]+", obj):
-                    mime = (
+                    mime = mime_hint or (
                         "audio/wav" if is_audio_data or key == "audio_url" else
                         "image/png" if key in ("image_url", "b64_json") else
                         "application/octet-stream"
                     )
-                    return self._extract(obj, mime, record, path)
+                    return self._extract(obj, mime, record, path, original_filename)
         return obj
 
 def extract_text_and_media(content):

@@ -35,13 +35,13 @@ def _decode(data, encoded):
     return blob
 
 
-def parse_upload(part, store):
+def parse_upload(part, store, *, fallback_filename=None):
     url = part.get('url')
     url = url if isinstance(url, str) else ''
     embedded = url[:5].lower() == 'data:'
     source = part.get('source')
     path = source.get('path') if isinstance(source, dict) else None
-    name = part.get('filename') or path
+    name = part.get('filename') or path or fallback_filename
     if not name and url and not embedded:
         name = unquote(url.split('?', 1)[0].split('#', 1)[0])
     name = ntpath.basename(name) if isinstance(name, str) else ''

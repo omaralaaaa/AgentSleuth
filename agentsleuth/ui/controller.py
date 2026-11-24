@@ -17,6 +17,11 @@ class ControllerMixin:
             self.db_path.set(path)
             self._load()
 
+    def _load_typed_source(self, _event):
+        if not self._loading:
+            self._load()
+        return 'break'
+
     def _browse_output(self):
         path = filedialog.askdirectory(parent=self, title='Choose export directory',
                                        initialdir=self.output_root.get())
@@ -36,7 +41,6 @@ class ControllerMixin:
 
     def _set_busy(self, busy):
         self._working = busy
-        self.load_button.configure(state='disabled' if self._loading else 'normal')
         if busy:
             self.progress.pack(side='right', padx=(12, 0))
             self.progress.start(30)
@@ -217,22 +221,22 @@ class ControllerMixin:
         self.conversation_stats.configure(text=f'{s["turns"]} turns · {s["activities"]} activities')
         self._turn_changed()
 
-    def _clear_chat(self, *, reset_folds=True):
+    def _clear_chat(self):
         self._cancel_render()
         self.canvas.delete('all')
         for row in self.canvas.winfo_children():
             row.destroy()
         self._rows.clear()
         self._row_cache.clear()
-        if reset_folds:
-            self._collapsed_prompts = set()
+        self._collapsed_prompts = set()
         self._content_height = 0
         self.canvas.configure(scrollregion=(0, 0, 0, 0))
         self._photos.clear()
         self.canvas.yview_moveto(0)
 
     def _section(self, label):
-        heading = self._label(self._new_row(), label, self.DIM, ('Consolas', 10, 'bold'),
+        row = self._new_row()
+        heading = self._label(row, label, self.DIM, ('Consolas', 10, 'bold'),
                               anchor='w', justify='left', wraplength=750)
         heading.pack(fill='x', padx=18, pady=(18, 4))
-        self._bind_conversation_wheel_tree(heading)
+        self._bind_conversation_wheel_tree(row)

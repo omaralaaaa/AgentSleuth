@@ -34,19 +34,19 @@ def is_powershell(argv, text):
     return bool(re.match(r'\s*(?:[\w]+-[A-Za-z]\w*\b|\$[\w:]+\s*=)', text))
 
 
-def command_parts(text):
+def command_parts(text, *, tokens=TOKENS, keywords=KEYWORDS, separators='|;&({='):
     # Insert tagged spans directly so offsets work for Unicode on every Tk build.
     parts = []
     pos = 0
     command_position = True
-    for token in TOKENS.finditer(text):
+    for token in tokens.finditer(text):
         kind, value = token.lastgroup, token.group()
         if token.start() > pos:
             parts.extend((text[pos:token.start()], ()))
         if kind == 'word':
-            kind = 'keyword' if value.lower() in KEYWORDS else 'command' if command_position else None
+            kind = 'keyword' if value.lower() in keywords else 'command' if command_position else None
         parts.extend((value, (kind,) if kind in COLORS else ()))
-        command_position = kind == 'newline' or (kind == 'operator' and value in '|;&({=')
+        command_position = kind == 'newline' or (kind == 'operator' and value in separators)
         pos = token.end()
     if pos < len(text):
         parts.extend((text[pos:], ()))

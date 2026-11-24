@@ -15,22 +15,13 @@ from ..core.paths import _path_from_stored
 from ..core.utils import safe_text
 from .powershell import insert_command
 from .render_plan import build_plan
+from .shell import shell_arguments
 
 
 
 
 
 class ConversationMixin:
-    def _set_view_mode(self, mode):
-        if mode == self.view_mode:
-            return
-        self.view_mode = mode
-        for name, button in self.view_buttons.items():
-            button.configure(style='Accent.TButton' if mode == name else 'TButton')
-        if self.result is not None:
-            self._clear_chat(reset_folds=False)
-            self._render()
-
     def _schedule_search(self, *_):
         if self._search_timer is not None:
             self.after_cancel(self._search_timer)
@@ -48,7 +39,7 @@ class ConversationMixin:
         cancel = self._plan_cancel = Event()
         future = self._plan_future = self._render_pool.submit(
             build_plan, self._index, self.query.get(), self.entry_type.get(),
-            selection - 1 if selection > 0 else None, self.view_mode == 'Tree',
+            selection - 1 if selection > 0 else None,
             frozenset(self._collapsed_prompts), frozenset(self._row_cache), cancel)
 
         def poll_plan():
@@ -135,7 +126,8 @@ class ConversationMixin:
         append_batch()
 
     def _render_error_entry(self, ordinal, error):
-        holder = tk.Frame(self._new_row(), bg=self.BG)
+        row = self._new_row()
+        holder = tk.Frame(row, bg=self.BG)
         holder.pack(fill='x', padx=16, pady=5)
         card = tk.Frame(holder, bg='#30272a', highlightthickness=1, highlightbackground='#70545b')
         card.pack(fill='x')
@@ -144,6 +136,7 @@ class ConversationMixin:
         self._label(card, safe_text(error), self.FG, ('Consolas', 9),
                     anchor='w', justify='left', wraplength=max(420, self.canvas.winfo_width() - 100)).pack(
                         fill='x', padx=12, pady=(2, 8))
+        self._bind_conversation_wheel_tree(row)
 
     def _new_row(self):
         row = tk.Frame(self.canvas, bg=self.BG)
@@ -173,7 +166,7 @@ class ConversationMixin:
         if at_bottom:
             self.canvas.yview_moveto(1)
 
-    def _body(self, parent, content, bg, max_rows=12, monospace=False, powershell=False):
+    def _body(self, parent, content, bg, max_rows=12, monospace=False, command_styles=None):
         """Fit short bodies to their wrapped text and scroll long bodies in place."""
         holder = tk.Frame(parent, bg=bg)
         holder.pack(fill='x', padx=13, pady=(3, 10))
@@ -183,11 +176,10 @@ class ConversationMixin:
                       padx=2, pady=2, spacing1=1, spacing3=1)
         scroll = ttk.Scrollbar(holder, orient='vertical', command=txt.yview)
         txt.configure(yscrollcommand=scroll.set)
-        value = safe_text(content)
-        if not value.isascii():
-            value = value.encode('utf-8', errors='backslashreplace').decode('utf-8')
-        if powershell:
-            insert_command(txt, value, powershell)
+        text = safe_text(content)
+        value = text if text.isascii() else text.encode('utf-8', errors='backslashreplace').decode('utf-8')
+        if command_styles and value == text:
+            insert_command(txt, value, command_styles)
         else:
             txt.insert('1.0', value)
         logical_rows = value.count('\n') + 1
@@ -217,7 +209,7 @@ class ConversationMixin:
         txt.bind('<Configure>', fit)
         return txt
 
-    def _field(self, panel, label, value, multiline=False, powershell=False, show_empty=False):
+    def _field(self, panel, label, value, multiline=False, command_styles=None, show_empty=False):
         if value is None or (value == '' and not show_empty):
             return
         if not multiline:
@@ -230,20 +222,17 @@ class ConversationMixin:
             return
         self._label(panel, label, self.DIM, ('Consolas', 9, 'bold')).pack(
             anchor='w', padx=13, pady=(7, 1))
-        self._body(panel, value, panel.cget('bg'), max_rows=9, monospace=True, powershell=powershell)
+        self._body(panel, value, panel.cget('bg'), max_rows=9, monospace=True, command_styles=command_styles)
 
     def _render_entry(self, entry):
         kind = entry['kind']
         is_message = kind == 'message'
         user = is_message and entry.get('role') == 'user'
         bg = '#28313b' if user else self.PANEL if is_message else '#25282d'
-        tree = self.view_mode == 'Tree'
-        nested = tree and id(entry) in self._index.prompt_for
-        holder = tk.Frame(self._new_row(), bg=self.BG)
-        margin = (16, 16)
-        if not tree and is_message:
-            margin = (54, 16) if user else (16, 54)
-        holder.pack(fill='x', padx=margin, pady=(8 if user else 0, 0))
+        nested = id(entry) in self._index.prompt_for
+        row = self._new_row()
+        holder = tk.Frame(row, bg=self.BG)
+        holder.pack(fill='x', padx=(16, 16), pady=(8 if user else 0, 0))
         if nested:
             guide = tk.Frame(holder, bg=self.BG, width=24)
             guide.pack(side='left', fill='y')
@@ -294,8 +283,9 @@ class ConversationMixin:
                 self._field(card, 'Truncated in source', safe_text(entry['truncated_fields']))
         key = id(entry)
         count = self._index.response_counts.get(key, 0)
-        if user and 'permissions' in entry:
-            self._label(card, 'Permissions: ' + entry['permissions'], self.DIM, ('Consolas', 9),
+        permission = entry.get('permission_mode', entry.get('permissions'))
+        if user and entry.get('agent') != 'opencode' and permission is not None:
+            self._label(card, f'Permissions: {permission}', self.DIM, ('Consolas', 9),
                         anchor='w', justify='left', wraplength=max(300, self.canvas.winfo_width() - 100)
                         ).pack(fill='x', padx=13, pady=(2, 4))
         if is_message:
@@ -319,7 +309,7 @@ class ConversationMixin:
             self._render_activity_fields(card, entry)
         for file in entry.get('file_links', ()):
             self._filename_link(card, file['filename'], file['saved_path'], file['suffix'])
-        if tree and user and count:
+        if user and count:
             def caption():
                 marker = '▸' if key in self._collapsed_prompts else '▾'
                 noun = 'response' if count == 1 else 'responses'
@@ -335,12 +325,20 @@ class ConversationMixin:
 
             button = ttk.Button(card, text=caption(), command=toggle, style='Disclosure.TButton')
             button.pack(anchor='w', padx=8, pady=(0, 4))
-        self._bind_conversation_wheel_tree(holder)
+        self._bind_conversation_wheel_tree(row)
 
     def _render_execution(self, panel, entry):
         execution = entry['execution']
         self._field(panel, 'Tool', execution['tool'])
-        self._field(panel, 'Input', execution['arguments'], multiline=True, show_empty=True)
+        if arguments := shell_arguments(entry):
+            self._field(panel, 'Shell command', arguments['command'], multiline=True,
+                        command_styles=self._command_styles.pop(id(entry), None))
+            if entry.get('agent') == 'opencode':
+                other = {key: value for key, value in arguments.items()
+                         if key not in ('command', 'workdir', 'cwd', 'working_directory')}
+                self._field(panel, 'Other input', other or None, multiline=True)
+        else:
+            self._field(panel, 'Input', execution['arguments'], multiline=True, show_empty=True)
         if execution['partial_input'] != execution['arguments']:
             self._field(panel, 'Recorded partial input', execution['partial_input'], multiline=True)
         self._field(panel, 'Recorded output', execution['output'], multiline=True, show_empty=True)
@@ -364,7 +362,7 @@ class ConversationMixin:
                 self._field(panel, 'Exit code', activity.get('exit_code'))
             command = activity.get('command')
             self._field(panel, 'Shell command', command, multiline=True,
-                        powershell=self._command_styles.pop(id(activity), None))
+                        command_styles=self._command_styles.pop(id(activity), None))
             output = activity.get('item', {}).get('aggregated_output')
             if output:
                 self._field(panel, 'Command stdout/stderr (aggregated)', output, multiline=True)
@@ -397,7 +395,6 @@ class ConversationMixin:
                     if isinstance(value, (list, dict)):
                         value = json.dumps(value, indent=2, ensure_ascii=False)
                     self._field(panel, name.capitalize(), value, multiline=name in {'arguments', 'result'})
-        self._field(panel, 'Correlation', activity.get('correlation_note'))
         self._file_links(panel, [], activity.get('attachments', []))
 
     def _filename_link(self, parent, filename, target=None, suffix=''):
@@ -425,17 +422,21 @@ class ConversationMixin:
         attachment_dir = Path(output_dir) / 'attachments' if output_dir else None
         used_ids = set()
 
-        # Pair source marker names with decoded attachments by their order in
-        # this message. The link target is always AgentSleuth's extracted copy,
-        # never the historical path recorded by Codex.
-        for index, ref in enumerate(file_refs or []):
-            fallback = extracted[index] if index < len(extracted) else None
+        # Match named files directly. Unnamed media can follow the marker order.
+        unnamed = iter(attachment for attachment in extracted if not attachment.get('original_filename'))
+        for ref in file_refs or []:
+            name = ref.get('filename')
+            fallback = next((attachment for attachment in extracted
+                             if name and attachment.get('original_filename') == name
+                             and attachment.get('attachment_id') not in used_ids), None)
+            if fallback is None:
+                fallback = next(unnamed, None)
             target = (attachment_dir / fallback['filename']) if fallback and attachment_dir else None
             if fallback:
                 used_ids.add(fallback.get('attachment_id'))
             self._filename_link(
                 parent,
-                ref.get('filename') or (fallback or {}).get('filename') or 'Attachment',
+                name or (fallback or {}).get('filename') or 'Attachment',
                 target,
                 suffix='· extracted copy' if target and target.is_file() else ''
             )
@@ -445,7 +446,8 @@ class ConversationMixin:
             if attachment.get('attachment_id') in used_ids:
                 continue
             target = attachment_dir / attachment['filename'] if attachment_dir else None
-            self._filename_link(parent, attachment['filename'], target, suffix='· extracted copy')
+            self._filename_link(parent, attachment.get('original_filename', attachment['filename']),
+                                target, suffix='· extracted copy')
 
     def _reveal_path(self, raw_path):
         """Navigate to a file in the OS file manager; never launch the file itself."""

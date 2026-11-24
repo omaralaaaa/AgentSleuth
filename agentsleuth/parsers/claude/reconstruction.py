@@ -174,11 +174,15 @@ def _finish_execution(entry, artifacts, attachments):
 def reconstruct(session_id, references, artifacts, progress=None):
     entries, calls, results, attachments, file_operations = [], [], [], [], []
     seen_records, seen_calls = set(), {}
+    permission_mode = ''
     for count, source in enumerate(references, 1):
         if progress and count % 250 == 0:
             progress(f'Reconstructing Claude Code · {count:,} records')
         record = source['raw'] or {}
         role = record.get('type')
+        if role == 'permission-mode':
+            permission_mode = string_value(record.get('permissionMode')).strip() or permission_mode
+            continue
         if role not in ('user', 'assistant', 'attachment'):
             continue
         if role == 'attachment':
@@ -208,7 +212,10 @@ def reconstruct(session_id, references, artifacts, progress=None):
             joined, links = _content(blocks, source, artifacts, attachments)
             text = _user_text(joined)
             if text.strip() or links:
-                entries.append(_message(session_id, source, 0, text, links))
+                permission_mode = string_value(record.get('permissionMode')).strip() or permission_mode
+                entry = _message(session_id, source, 0, text, links)
+                entry['permission_mode'] = permission_mode or 'Not recorded'
+                entries.append(entry)
             continue
         # One model message can have several distinct JSONL records.
         errors = (message.get('error'), record.get('error'))

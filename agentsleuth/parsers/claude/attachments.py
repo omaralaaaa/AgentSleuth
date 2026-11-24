@@ -1,10 +1,9 @@
 """Extract explicit structured Claude media without opening external references."""
 
-import base64
 import mimetypes
 import re
 
-from .artifacts import MAX_FILE_BYTES, filename
+from .artifacts import decode_base64, filename
 from .records import object_value, string_value
 
 
@@ -24,13 +23,8 @@ def attachment(block, reference, index, artifacts):
               'saved_path': None}
     if source.get('type') != 'base64':
         return result
-    encoded = source.get('data')
     try:
-        if not isinstance(encoded, str) or len(encoded) > 4 * ((MAX_FILE_BYTES + 2) // 3):
-            raise ValueError('Missing or oversized Base64 attachment')
-        blob = base64.b64decode(encoded, validate=True)
-        if not blob:
-            raise ValueError('Empty Base64 attachment')
+        blob = decode_base64(source.get('data'))
         result.update(artifacts.save('attachments', display_name, blob))
         result.update(status='extracted', suffix='· extracted attachment')
     except (ValueError, OSError, RuntimeError) as error:

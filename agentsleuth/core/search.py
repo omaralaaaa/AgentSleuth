@@ -1,5 +1,7 @@
 """Search normalized transcript fields without consulting Tk widgets or evidence files."""
 
+from collections import defaultdict
+
 from .utils import safe_text
 
 
@@ -52,12 +54,10 @@ class TranscriptIndex:
     def __init__(self, turns):
         self.turns = []
         self.turn_filters = []
-        all_values = set()
         self.prompt_for = {}
         self.response_counts = {}
         for turn in turns:
             records = []
-            turn_values = set()
             prompt = None
             for entry in turn['entries']:
                 if entry.get('kind') == 'message' and entry.get('role') == 'user':
@@ -77,16 +77,22 @@ class TranscriptIndex:
                 values.extend(execution[k] for k in ('tool', 'arguments', 'partial_input', 'status',
                               'output', 'error', 'metadata', 'start_label', 'end_label') if k in execution)
                 facets = filter_values(entry)
-                turn_values.update(facets)
                 records.append((entry, facets, '\n'.join(map(safe_text, values)).casefold()))
             self.turns.append((turn['title'], records))
-            self.turn_filters.append(self._choices(turn_values))
-            all_values.update(turn_values)
-        self.filters = self._choices(all_values)
+            self.turn_filters.append(self._choices(facets for _, facets, _ in records))
+        self.filters = self._choices(facets for _, records in self.turns for _, facets, _ in records)
 
     @staticmethod
-    def _choices(values):
-        return (ALL_ENTRIES, *sorted(values, key=lambda v: (':' in v, v.casefold(), v)))
+    def _choices(entry_facets):
+        matches = defaultdict(list)
+        for position, facets in enumerate(entry_facets):
+            for facet in facets:
+                matches[facet].append(position)
+        categories = {tuple(rows) for value, rows in matches.items() if ':' not in value}
+        # Keep raw types that can narrow a category and types with no category.
+        choices = (value for value, rows in matches.items()
+                   if not value.startswith('Type: ') or tuple(rows) not in categories)
+        return (ALL_ENTRIES, *sorted(choices, key=lambda v: (':' in v, v.casefold(), v)))
 
     def matches(self, query, kind, turn_index=None, *, cancelled=None):
         terms = query.casefold().split()

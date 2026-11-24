@@ -11,7 +11,7 @@ from .database import ORDER_FIELDS, SKIPPED_PART_TYPES
 
 ARTIFACT_TYPES = {'file': 'file_attachment', 'patch': 'file_change'}
 TOOL_FIELDS = {'input': 'arguments', 'output': 'output', 'error': 'error',
-               'metadata': 'metadata', 'raw': 'partial_input'}
+               'metadata': 'metadata', 'raw': 'partial_input', 'attachments': 'attachments'}
 
 
 def _object(value):

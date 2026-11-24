@@ -22,7 +22,7 @@ def wait_render(pane):
 
 
 class ViewerTest(unittest.TestCase):
-    def test_codex_command_card_hides_execution_metadata(self):
+    def test_codex_cards_show_permission_mode_and_hide_command_metadata(self):
         try:
             root = App()
         except tk.TclError as error:
@@ -32,12 +32,16 @@ class ViewerTest(unittest.TestCase):
         self.addCleanup(root.destroy)
         root.geometry('1000x700+10000+10000')
         pane = root.codex
-        command = dict(agent='codex', kind='activity', activity_type='CommandExecution', ordinal=1,
+        prompt = dict(agent='codex', kind='message', role='user', ordinal=1, text='Example prompt',
+                      permissions=':danger-full-access · danger-full-access · Approval: never',
+                      permission_mode='danger-full-access')
+        command = dict(agent='codex', kind='activity', activity_type='CommandExecution', ordinal=2,
                        command='echo hello', item={'aggregated_output': 'hello'},
-                       status='completed', pid=22612, cwd='file:///workspace', exit_code=0)
-        file_change = dict(agent='codex', kind='activity', activity_type='FileChange', ordinal=2,
+                       status='completed', pid=22612, cwd='file:///workspace', exit_code=0,
+                       correlation_note='inferred_command_match')
+        file_change = dict(agent='codex', kind='activity', activity_type='FileChange', ordinal=3,
                            status='completed', item={})
-        pane.result = dict(turns=[dict(title='Example', entries=[command, file_change])],
+        pane.result = dict(turns=[dict(title='Example', entries=[prompt, command, file_change])],
                            summary=dict(turns=1, activities=2))
         pane._after_reconstruct()
         wait_render(pane)
@@ -47,14 +51,18 @@ class ViewerTest(unittest.TestCase):
                 yield child
                 yield from descendants(child)
 
+        prompt_labels = [widget.cget('text') for widget in descendants(pane._row_cache[id(prompt)][1])
+                         if isinstance(widget, tk.Label) and widget.cget('text').startswith('Permissions:')]
+        self.assertEqual(prompt_labels, ['Permissions: danger-full-access'])
         widgets = list(descendants(pane._row_cache[id(command)][1]))
         labels = [widget.cget('text') for widget in widgets if isinstance(widget, tk.Label)]
-        self.assertFalse(any(label.startswith(('Status:', 'Process ID:', 'Working directory:', 'Exit code:'))
-                             for label in labels))
+        hidden_fields = ('Status:', 'Process ID:', 'Working directory:', 'Exit code:', 'Correlation:')
+        self.assertFalse(any(label.startswith(hidden_fields) for label in labels))
         self.assertEqual([widget.get('1.0', 'end-1c') for widget in widgets if isinstance(widget, tk.Text)],
                          ['echo hello', 'hello'])
         self.assertEqual([command[key] for key in ('status', 'pid', 'cwd', 'exit_code')],
                          ['completed', 22612, 'file:///workspace', 0])
+        self.assertEqual(command['correlation_note'], 'inferred_command_match')
         self.assertIn('Status:  completed', [widget.cget('text') for widget in
                       descendants(pane._row_cache[id(file_change)][1]) if isinstance(widget, tk.Label)])
 
@@ -101,6 +109,8 @@ class ViewerTest(unittest.TestCase):
         self.addCleanup(root.destroy)
         root.geometry('1000x700+10000+10000')
         app = root.codex
+        self.assertFalse(any(child.winfo_class() == 'TButton'
+                             for child in app.turn_options.master.winfo_children()))
         first, reply, second, later = [
             dict(kind='message', role=role, ordinal=n, text=str(n))
             for n, role in [(1, 'user'), (2, 'assistant'), (4, 'user'), (5, 'assistant')]
@@ -147,22 +157,13 @@ class ViewerTest(unittest.TestCase):
         wait_render(app)
         self.assertTrue(all(visible(e) for e in (first, reply, tool, second, later)))
         button.invoke()
-        app.view_buttons['Conversation'].invoke()
-        wait_render(app)
-        self.assertTrue(all(visible(e) for e in (first, reply, tool, second, later)))
-        self.assertIsNone(button_under(app._row_cache[id(first)][1]))
-        self.assertEqual([app._row_cache[id(e)] for e in (first, reply, tool, second, later)], app._rows)
         app.entry_type.set('Tool calls')
         app._render()
         wait_render(app)
-        self.assertEqual(app._rows, [app._row_cache[id(tool)]])
-        app.view_buttons['Tree'].invoke()
-        wait_render(app)
-        self.assertEqual(app.entry_type.get(), 'Tool calls')
+        self.assertEqual(app._rows, [app._row_cache[('turn', 0)], app._row_cache[id(first)]])
         self.assertTrue(visible(first))
         self.assertIn(id(first), app._collapsed_prompts)
-        self.assertNotIn(id(tool), app._row_cache)
-        self.assertEqual(root.opencode.view_mode, 'Tree')
+        self.assertFalse(visible(tool))
 
     def test_powershell_highlighting_preserves_command_text(self):
         command = "Get-Item -Path $target | Select-Object 'Name' # café"
@@ -200,10 +201,12 @@ class ViewerTest(unittest.TestCase):
         root.geometry('1000x700+10000+10000')
         app = root.codex
         with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / 'sample'
+            source = Path(directory).resolve() / 'sample'
             source.touch()
             app.db_path.set(str(source))
-            app._load()
+            root.update()
+            app.source_entry.focus_force()
+            app.source_entry.event_generate('<Return>')
             app.update()
             self.assertTrue(app.progress.winfo_ismapped())
             initial = app.progress['value']
@@ -219,6 +222,7 @@ class ViewerTest(unittest.TestCase):
                 time.sleep(.01)
             self.assertFalse(app._working)
             self.assertFalse(app.progress.winfo_ismapped())
+            self.assertEqual(app._loaded_db, source)
 
     def test_continuous_transcript_and_nested_scrolling(self):
         try:
@@ -260,6 +264,15 @@ class ViewerTest(unittest.TestCase):
         finish_render()
         self.assertEqual(len(bodies()), 220)
         self.assertGreater(app._content_height, 32767)
+        for label, key in [('turn heading', ('turn', 1)), ('prompt card', id(turns[1]['entries'][0]))]:
+            with self.subTest(wheel_target=label):
+                item, row = app._row_cache[key]
+                app.canvas.yview_moveto(app.canvas.coords(item)[1] / app._content_height)
+                app.update()
+                self.assertTrue(row.winfo_ismapped())
+                previous = app.canvas.yview()[0]
+                row.event_generate('<MouseWheel>', x=5, y=5, delta=-120)
+                self.assertGreater(app.canvas.yview()[0], previous)
         app.canvas.yview_moveto(1)
         app.update()
         last = bodies()[-1]

@@ -31,15 +31,15 @@ For SQLite evidence, use a consistent snapshot. Recent records may still be in a
 
 Click **Scan for artifacts…** above the agent tabs. **Scan this PC** checks known agent directories in accessible Windows user profiles. **Scan evidence folder…** searches beneath a directory you select, such as the top of a KAPE collection or its extracted C-drive folder. You can select the collection even when the user profiles are nested several levels down. Raw disk-image files must first be mounted or extracted.
 
-Each result represents one agent folder. Check the box next to each folder you want to open, then click **Open selected**. Double-click a folder name to open it individually. Each source loads its own conversation list. Multiple sources for the same agent open in separate tabs. The scanner resolves the index automatically, choosing the highest numbered Codex state database when several are present. Antigravity folders without an index can list sessions from generated transcripts and trajectory databases. Scroll horizontally to inspect long paths.
+Each result represents one agent folder. Use the row checkboxes or the **Select all** button to choose folders, then click **Open selected**. Double-click a folder name to open it individually. Each source loads its own conversation list. Multiple sources for the same agent open in separate tabs. The scanner resolves the index automatically, choosing the highest numbered Codex state database when several are present. Antigravity folders without an index can list sessions from generated transcripts and trajectory databases. Scroll horizontally to inspect long paths.
 
 ### Open a source manually
 
-1. Select an agent tab and browse to its source file. Use **Load conversations** after entering a path manually.
+1. Select an agent tab and click **Browse** to pick and load its source file. If you type or paste a path, press **Enter** to load it.
 2. The default export directory is `AgentSleuth_Export/` beside the application script. **Change folder** selects a shared directory for all agent tabs and saves the choice for future launches.
 3. Select a conversation in the sidebar. The sidebar filter searches conversation names, working directories, and IDs. Each tab loads and caches its own sessions.
 4. Press **Ctrl+F** to search the selected transcript. Terms are case-insensitive and can appear in any order. The filter lists values present in the selected conversation or turn, including exact tool names, activity types, and recorded statuses. For example, a recorded Bash call can match **Commands**, **Tool calls**, or **Tool: bash**. Filtering by a tool name also includes failed attempts. Tree view keeps a matching reply's parent prompt for context.
-5. Choose **Tree** to group responses and tool calls under each prompt, or **Conversation** to read matching entries in timeline order. Switching views keeps the selected turn, search, and filters. Returning to Tree restores folded prompts. Long text blocks scroll independently. Click an extracted filename to reveal its copy in the file manager.
+5. Responses and tool calls are grouped under each prompt in Tree view. Click the response count to collapse or expand that prompt's replies. Long text blocks scroll independently. Click an extracted filename to reveal its copy in the file manager.
 
 ## Interpret the results
 

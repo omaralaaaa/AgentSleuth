@@ -40,7 +40,7 @@ def returned(call_id, content, **fields):
     return {'type': 'tool_result', 'tool_use_id': call_id, 'content': content, **fields}
 
 
-def build_fixture(root, output='bash recorded output'):
+def build_fixture(root, output='bash recorded output', *, shell_input=None):
     evidence = root / '.claude'
     index = evidence / 'history.jsonl'
     transcript = evidence / 'projects' / 'D--CD' / f'{SESSION}.jsonl'
@@ -66,7 +66,7 @@ def build_fixture(root, output='bash recorded output'):
                 parent='user-one', model_id='model-one'),
         '{broken JSON',
         message('assistant', 'call', [tool('call-write', 'Write', file_path=file_path, content='Hello, World!'),
-                                      tool('call-bash', 'Bash', command='example-command')],
+                                      tool('call-bash', 'Bash', **(shell_input or {'command': 'example-command'}))],
                 parent='thought', model_id='model-one', requestId='request-1'),
         message('user', 'results', [returned('call-bash', output), returned('call-write', 'File created')],
                 parent='call', sourceToolAssistantUUID='call', time='2026-01-01T00:00:03Z'),
@@ -174,6 +174,25 @@ class ClaudeParserTest(unittest.TestCase):
         self.assertEqual(main[0]['raw']['source']['raw']['permissionMode'], 'default')
         self.assertEqual([[entry['text'] for entry in entries_for(branch)] for branch in result['sidechains']],
                          [['Sidechain prompt', 'Sidechain response'], ['Separate subagent response']])
+
+    def test_prompt_permissions_follow_recorded_modes_in_transcript_order(self):
+        change = {'type': 'permission-mode', 'sessionId': SESSION, 'permissionMode': 'acceptEdits'}
+        write_jsonl(self.transcript, [
+            message('user', 'first', 'Mode unknown'),
+            change,
+            message('user', 'second', 'After the mode change', time='2026-01-01T00:00:00Z'),
+            message('user', 'third', 'Explicit mode', permissionMode='plan'),
+            dict(change, permissionMode=['malformed']),
+            dict(change, agentId='branch', permissionMode='bypassPermissions'),
+            message('user', 'branch-prompt', 'On a separate branch', agentId='branch'),
+            message('user', 'last', 'Still in plan mode'),
+        ])
+        result = self.parse()
+        self.assertEqual([entry['permission_mode'] for entry in entries_for(result)],
+                         ['Not recorded', 'acceptEdits', 'plan', 'plan'])
+        branch, = (branch for branch in result['sidechains'] if branch['branch'] == 'branch')
+        self.assertEqual([entry['permission_mode'] for entry in entries_for(branch)], ['bypassPermissions'])
+        self.assertEqual(result['records'][1]['raw'], change)
 
     def test_correlates_batch_results_and_keeps_missing_or_failed_states(self):
         main = {entry['call_id']: entry for entry in entries_for(self.parse()) if 'execution' in entry}
@@ -298,6 +317,63 @@ class ClaudeParserTest(unittest.TestCase):
         self.assertEqual(Path(write['saved_path']).read_text(encoding='utf-8'), 'recorded')
         self.assertEqual(write['saved_path'], read['saved_path'])
 
+    def test_recovers_completed_pdf_reads_from_recorded_base64(self):
+        pdf = b'%PDF-1.4\n%example\n%%EOF\n'
+        encoded = base64.b64encode(pdf).decode()
+        cases = [
+            ('complete', {'base64': encoded, 'originalSize': len(pdf)}, False),
+            ('unsized', {'base64': encoded}, False),
+            ('bad-base64', {'base64': 'bad!'}, False),
+            ('wrong-size', {'base64': encoded, 'originalSize': len(pdf) + 1}, False),
+            ('wrong-format', {'base64': base64.b64encode(b'not a PDF').decode()}, False),
+            ('truncated', {'base64': base64.b64encode(b'%PDF-1.4\n').decode()}, False),
+            ('reference-only', {}, False),
+            ('failed', {'base64': encoded, 'originalSize': len(pdf)}, True),
+        ]
+        rows = [message('user', 'user', 'Read the PDFs')]
+        for name, fields, failed in cases:
+            path = f'D:/recorded/{name}.pdf'
+            rows.extend([
+                message('assistant', name, [tool(name, 'Read', file_path=path)]),
+                message('user', name + '-result', [returned(name, 'Recorded result', is_error=failed)],
+                        toolUseResult={'type': 'pdf', 'file': {'filePath': path, **fields}}),
+            ])
+        write_jsonl(self.transcript, rows)
+        result = self.parse()
+        recovered = {file['filename']: file for file in result['recovered_files']}
+        self.assertEqual(set(recovered), {'complete.pdf', 'unsized.pdf'})
+        for name, artifact in recovered.items():
+            saved = Path(artifact['saved_path'])
+            self.assertEqual(saved.parent.name, 'recovered_files')
+            self.assertTrue(saved.name.endswith(f'_{name}'))
+            self.assertEqual(saved.read_bytes(), pdf)
+        executions = {entry['call_id']: entry for entry in entries_for(result) if 'execution' in entry}
+        self.assertEqual(executions['complete']['file_links'], [recovered['complete.pdf']])
+        self.assertEqual(executions['complete']['execution']['output'], 'Recorded result')
+        for name, _, _ in cases[2:]:
+            self.assertIsNone(executions[name]['file_links'][0]['saved_path'], name)
+
+    def test_recovers_other_binary_reads_and_skips_truncated_payloads(self):
+        payload = bytes(range(20))
+        location = 'D:/recorded/example.bin'
+        file = dict(filePath=location, base64=base64.b64encode(payload).decode(),
+                    originalSize=len(payload))
+        write_jsonl(self.transcript, [
+            message('user', 'prompt', 'Read the file'),
+            message('assistant', 'actual', [tool('actual', 'Read', file_path=location)]),
+            message('user', 'actual-done', [returned('actual', 'Recorded bytes')],
+                    toolUseResult={'type': 'binary', 'file': file}),
+            message('assistant', 'partial', [tool('partial', 'Read', file_path=location)]),
+            message('user', 'partial-done', [returned('partial', 'Partial bytes')],
+                    toolUseResult={'type': 'binary', 'file': dict(file, truncated=True)}),
+        ])
+        result = self.parse()
+        recovered, = result['recovered_files']
+        self.assertEqual(recovered['filename'], 'example.bin')
+        self.assertEqual(Path(recovered['saved_path']).read_bytes(), payload)
+        _, partial = (entry for entry in entries_for(result) if 'execution' in entry)
+        self.assertIsNone(partial['file_links'][0]['saved_path'])
+
 
 class ClaudeViewerTest(unittest.TestCase):
     def test_claude_tab_discovers_on_worker_and_renders_scrollable_execution_and_safe_links(self):
@@ -340,8 +416,10 @@ class ClaudeViewerTest(unittest.TestCase):
                 yield from descendants(child)
 
         long_output = 'recorded line\n' * 300 + 'last output line'
+        command = 'printf "%s\\n" "hello"\npwd'
+        shell_input = dict(command=command, cwd=r'D:\evidence', description='Show current directory')
         with tempfile.TemporaryDirectory() as temporary:
-            index, _, output = build_fixture(Path(temporary), long_output)
+            index, _, output = build_fixture(Path(temporary), long_output, shell_input=shell_input)
             with patch.object(claude, 'load_threads', side_effect=load_on_worker), patch.object(
                 claude, 'reconstruct_from_thread', side_effect=parse_on_worker
             ):
@@ -351,7 +429,10 @@ class ClaudeViewerTest(unittest.TestCase):
                 wait_for(lambda: not pane._working)
                 self.assertIsNone(pane.result)
                 self.assertEqual(len(worker_ids), 1)
-                self.assertEqual(pane.conversations.item('0', 'values')[1:3], ('Create hello.txt', PROJECT))
+                self.assertEqual(tuple(map(str, pane.conversations['columns'])), ('number', 'name'))
+                _, title = pane.conversations.item('0', 'values')
+                self.assertEqual(title, 'Create hello.txt')
+                self.assertEqual(pane.threads[0]['cwd'], PROJECT)
                 pane.conversations.selection_set('0')
                 wait_for(lambda: pane.result is not None and pane._render_timer is None)
 
@@ -359,6 +440,8 @@ class ClaudeViewerTest(unittest.TestCase):
             labels = [widget for widget in widgets if isinstance(widget, tk.Label)]
             strings = [widget.cget('text') for widget in labels]
             self.assertTrue({'USER', 'AGENT', 'EXECUTION · WRITE', 'AGENT ERROR'}.issubset(strings))
+            self.assertEqual([label for label in strings if label.startswith('Permissions:')],
+                             ['Permissions: default', 'Permissions: default'])
             self.assertFalse(any('Call ID' in text or 'call-write' in text or 'MESSAGE EVIDENCE' in text
                                  for text in strings))
             self.assertFalse(any(text.startswith(('Started:', 'Ended:')) or text == 'Metadata'
@@ -372,7 +455,19 @@ class ClaudeViewerTest(unittest.TestCase):
             self.assertEqual(body.get('1.0', 'end-1c'), long_output)
             self.assertEqual(int(body['height']), 9)
             bash, = (entry for entry in entries_for(pane.result) if entry.get('call_id') == 'call-bash')
-            item, _ = pane._row_cache[id(bash)]
+            self.assertEqual(bash['execution']['arguments'], shell_input)
+            item, card = pane._row_cache[id(bash)]
+            card_widgets = list(descendants(card))
+            card_labels = [widget.cget('text') for widget in card_widgets if isinstance(widget, tk.Label)]
+            self.assertIn('Shell command', card_labels)
+            self.assertNotIn('Other input', card_labels)
+            self.assertFalse(any(label.startswith('Working directory:') or shell_input['cwd'] in label
+                                 for label in card_labels))
+            blocks = [widget for widget in card_widgets if isinstance(widget, tk.Text)]
+            self.assertEqual([widget.get('1.0', 'end-1c') for widget in blocks], [command, long_output])
+            ranges = blocks[0].tag_ranges('command')
+            self.assertEqual([blocks[0].get(start, end) for start, end in zip(ranges[::2], ranges[1::2])],
+                             ['printf', 'pwd'])
             pane.canvas.yview_moveto(pane.canvas.coords(item)[1] / pane._content_height)
             root.update()
             self.assertTrue(body.winfo_ismapped())

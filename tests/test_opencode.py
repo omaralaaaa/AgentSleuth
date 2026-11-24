@@ -20,7 +20,7 @@ from agentsleuth.ui.app import App
 
 SCHEMA = """
 CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT, directory TEXT,
-                      time_created INTEGER, time_updated INTEGER);
+                      time_created INTEGER, time_updated INTEGER, permission TEXT);
 CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER,
                       time_updated INTEGER, data TEXT, ordinal INTEGER);
 CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
@@ -29,13 +29,16 @@ CREATE INDEX part_message ON part (message_id);
 """
 
 
-def build_database(path, output='recorded output'):
+def build_database(path, output='recorded output', *, shell_input=None):
     """Insert records out of timeline order and a second, independent session."""
     with closing(sqlite3.connect(path)) as db, db:
         db.executescript(SCHEMA)
-        db.executemany('INSERT INTO session VALUES (?, ?, ?, ?, ?)', [
-            ('other', 'Other title', '/elsewhere', 10, 20),
-            ('session', 'Recorded session title', '/recorded/workdir', 1, 100),
+        db.executemany('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)', [
+            ('other', 'Other title', '/elsewhere', 10, 20, None),
+            ('session', 'Recorded session title', '/recorded/workdir', 1, 100, json.dumps([
+                {'permission': 'bash', 'pattern': 'pwd', 'action': 'allow'},
+                {'permission': 'read', 'pattern': '*.env', 'action': 'ask'},
+            ])),
         ])
 
         def message(message_id, session_id, created, role, ordinal=None, **data):
@@ -66,7 +69,8 @@ def build_database(path, output='recorded output'):
         part('unnumbered-reasoning', 'a-reply', 13, dict(type='reasoning', text='Omitted reasoning'))
         part('step-finish', 'a-reply', 14, dict(type='step-finish'))
         part('bash-pending', 'a-reply', 6, dict(type='tool', tool='bash', callID='bash-call',
-                                               state=dict(status='pending', input={'command': 'pwd'})), 3)
+                                               state=dict(status='pending',
+                                                          input=shell_input or {'command': 'pwd'})), 3)
         part('bash-completed', 'a-reply', 8, dict(type='tool', tool='bash', callID='bash-call',
                                                  state=dict(status='completed', output=output,
                                                             metadata={'output': output, 'exit': 0,
@@ -74,7 +78,8 @@ def build_database(path, output='recorded output'):
                                                                       'truncated': False},
                                                             time={'start': 6, 'end': 8})), 4)
         part('failed', 'a-reply', 9, dict(type='tool', tool='read', callID='read-call',
-                                         state=dict(status='error', error='Permission denied')), 5)
+                                         state=dict(status='error', input={'filePath': 'example.txt'},
+                                                    error='Permission denied')), 5)
         part('running', 'a-reply', 10, dict(type='tool', tool='search', state={'status': 'running'}), 6)
         part('pending', 'a-reply', 14,
              dict(type='tool', tool='search', state={'status': 'pending', 'raw': '{"query":'}),
@@ -112,6 +117,26 @@ class OpenCodeTest(unittest.TestCase):
         self.parse()
         self.assertEqual(self.db.read_bytes(), before)
 
+    def test_prompt_permissions_use_only_recorded_session_rules(self):
+        for raw, expected in (
+            (json.dumps([{'permission': 'bash', 'pattern': '*', 'action': 'allow'}]), 'Session rules (allow)'),
+            (json.dumps([{'action': 'read', 'resource': '*.env', 'effect': 'deny'}]), 'Session rules (deny)'),
+            (None, 'Not recorded'),
+            ('[]', 'Not recorded'),
+            ('{malformed', 'Not recorded'),
+            ('[null, {"permission": "bash", "pattern": "*", "action": {}}]', 'Not recorded'),
+        ):
+            with self.subTest(raw=raw):
+                with closing(sqlite3.connect(self.db)) as db, db:
+                    db.execute('UPDATE session SET permission = ? WHERE id = ?', (raw, 'session'))
+                result = self.parse()
+                entries = [entry for turn in result['turns'] for entry in turn['entries']]
+                self.assertEqual([entry['permission_mode'] for entry in entries if 'permission_mode' in entry],
+                                 [expected, expected])
+                self.assertTrue(all(('permission_mode' in entry) == (entry['event_type'] == 'user_prompt')
+                                    for entry in entries))
+                self.assertEqual(result['thread']['raw']['permission'], raw)
+
     def test_uploaded_files_extract_and_link_to_their_message(self):
         binary = bytes(range(256))
         encoded = base64.b64encode(binary).decode()
@@ -144,6 +169,54 @@ class OpenCodeTest(unittest.TestCase):
             self.assertIsNone(files[key]['saved_path'])
         self.assertEqual(result['summary']['attachments'], 2)
         self.assertEqual(result['attachment_failures'][0]['part_id'], 'bad-file')
+        self.assertEqual(self.db.read_bytes(), before)
+
+    def test_recovers_tool_result_attachments_and_complete_file_writes(self):
+        pdf = b'%PDF-1.4\n%%EOF\n'
+        archive = bytes(range(16))
+        paths = dict(pdf='D:/recorded/document.pdf', written='D:/recorded/config.json',
+                     edited='D:/recorded/updated.txt', partial='D:/recorded/partial.txt',
+                     failed='D:/recorded/failed.txt')
+        written = '{"name":"café"}\r\n'
+        states = {
+            'pdf': ('read', dict(input={'filePath': paths['pdf']}, attachments=[
+                {'type': 'file', 'id': 'pdf-attachment', 'mime': 'application/pdf',
+                 'url': 'data:application/pdf;base64,' + base64.b64encode(pdf).decode()},
+            ])),
+            'archive': ('custom', dict(attachments=[
+                {'type': 'file', 'filename': 'bundle.zip', 'mime': 'application/zip',
+                 'url': 'data:application/zip;base64,' + base64.b64encode(archive).decode()},
+                {'type': 'file', 'filename': 'linked.txt', 'url': 'file:///D:/recorded/linked.txt'},
+            ])),
+            'written': ('write', dict(input={'filePath': paths['written'], 'content': written})),
+            'edited': ('edit', dict(input={'filePath': paths['edited']},
+                                    metadata={'filediff': {'file': paths['edited'], 'after': 'complete\n'}})),
+            'partial': ('edit', dict(input={'filePath': paths['partial'], 'newString': 'fragment'},
+                                      metadata={'filediff': {'patch': 'partial patch'}})),
+            'failed': ('write', dict(status='error', input={'filePath': paths['failed'], 'content': 'failed'})),
+        }
+        with closing(sqlite3.connect(self.db)) as db, db:
+            for sequence, (key, (tool, state)) in enumerate(states.items(), 20):
+                data = dict(type='tool', tool=tool, callID=key, state={'status': 'completed', **state})
+                db.execute('INSERT INTO part VALUES (?, ?, ?, ?, ?, ?, ?)',
+                           ('tool-file-' + key, 'a-reply', 'session', sequence, sequence, json.dumps(data), sequence))
+        before = self.db.read_bytes()
+        root = self.db.parent / 'results'
+        result = opencode.reconstruct_from_thread(self.db, opencode.load_threads(self.db)[0], root)
+        cards = {entry['call_id']: entry for turn in result['turns'] for entry in turn['entries']
+                 if entry.get('call_id') in states}
+        pdf_link, = cards['pdf']['file_links']
+        self.assertEqual((pdf_link['filename'], pdf_link['attachment_part_id']), ('document.pdf', 'pdf-attachment'))
+        self.assertEqual(Path(pdf_link['saved_path']).read_bytes(), pdf)
+        binary, reference = cards['archive']['file_links']
+        self.assertEqual(Path(binary['saved_path']).read_bytes(), archive)
+        self.assertIsNone(reference['saved_path'])
+        self.assertEqual({item['filename']: Path(item['saved_path']).read_bytes() for item in result['recovered_files']},
+                         {'config.json': written.encode(), 'updated.txt': b'complete\n'})
+        self.assertIsNone(cards['partial']['file_links'][0]['saved_path'])
+        self.assertFalse(cards['failed'].get('file_links'))
+        self.assertEqual(result['summary']['recovered_files'], 2)
+        self.assertEqual(result['summary']['attachments'], 2)
         self.assertEqual(self.db.read_bytes(), before)
 
     def test_message_and_part_order_and_relationships(self):
@@ -436,9 +509,11 @@ class OpenCodeViewerTest(unittest.TestCase):
         pane = root.opencode
         root.tabs.select(pane)
         output = ''.join(f'Output line {number} · café\n' for number in range(400)) + 'Unique ending'
+        command = 'cd /tmp && printf \'%s\\n\' "café"\nls -la "$HOME" || true'
+        shell_input = dict(command=command, workdir=r'D:\evidence', timeout=5000)
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / 'opencode.db'
-            build_database(source, output=output)
+            build_database(source, output=output, shell_input=shell_input)
             pane.db_path.set(str(source))
             pane._load()
             self.wait_for(root, lambda: not pane._working)
@@ -460,6 +535,9 @@ class OpenCodeViewerTest(unittest.TestCase):
 
         labels = [widget.cget('text') for widget in descendants(pane.canvas)
                   if isinstance(widget, tk.Label)]
+        self.assertFalse(any(label.startswith('Permissions:') for label in labels))
+        self.assertEqual([entry['permission_mode'] for entry in rendered if entry['event_type'] == 'user_prompt'],
+                         ['Session rules (allow, ask)'] * 2)
         self.assertFalse(any(label.startswith(('Message ID', 'Part ID', 'Call ID')) for label in labels))
         self.assertFalse(any(label.startswith(('Started:', 'Ended:')) or label == 'Metadata' for label in labels))
         self.assertIn('Status:  completed', labels)
@@ -477,7 +555,7 @@ class OpenCodeViewerTest(unittest.TestCase):
         contents = [widget.get('1.0', 'end-1c') for widget in widgets]
         self.assertIn('First response', contents)
         self.assertIn('Permission denied', contents)
-        self.assertIn('pwd', ' '.join(contents))
+        self.assertIn(json.dumps({'filePath': 'example.txt'}, indent=2), contents)
         self.assertFalse(any('Internal tool description' in text or '"truncated"' in text for text in contents))
         self.assertEqual(sum(text.count('Unique ending') for text in contents), 1)
         body, = (widget for widget, text in zip(widgets, contents) if text == output)
@@ -486,7 +564,18 @@ class OpenCodeViewerTest(unittest.TestCase):
         self.assertTrue(any(child.winfo_manager() == 'pack' for child in body.master.winfo_children()
                             if str(child.winfo_class()) == 'TScrollbar'))
         execution, = (entry for entry in rendered if entry.get('call_id') == 'bash-call')
-        item, _ = pane._row_cache[id(execution)]
+        self.assertEqual(execution['execution']['arguments'], shell_input)
+        item, card = pane._row_cache[id(execution)]
+        card_widgets = list(descendants(card))
+        card_labels = [widget.cget('text') for widget in card_widgets if isinstance(widget, tk.Label)]
+        self.assertFalse(any(label.startswith('Working directory:') or shell_input['workdir'] in label
+                             for label in card_labels))
+        blocks = [widget for widget in card_widgets if isinstance(widget, tk.Text)]
+        self.assertEqual([widget.get('1.0', 'end-1c') for widget in blocks],
+                         [command, json.dumps({'timeout': 5000}, indent=2), output])
+        ranges = blocks[0].tag_ranges('command')
+        self.assertEqual([blocks[0].get(start, end) for start, end in zip(ranges[::2], ranges[1::2])],
+                         ['cd', 'printf', 'ls', 'true'])
         pane.canvas.yview_moveto(pane.canvas.coords(item)[1] / pane._content_height)
         root.update()
         outer = pane.canvas.yview()

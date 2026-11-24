@@ -74,7 +74,8 @@ class LayoutMixin:
         mark.create_line(5, 7, 10, 12, 5, 17, fill=self.ACCENT, width=2)
         mark.create_rectangle(13, 15, 21, 17, fill=self.ACCENT, outline='')
         self._label(masthead, 'AGENTSLEUTH', self.FG, ('Consolas', 19, 'bold')).pack(side='left')
-        ttk.Button(masthead, text='Scan for artifacts…', command=self.open_scanner).pack(side='right')
+        ttk.Button(masthead, text='Scan for artifacts…', style='Accent.TButton',
+                   command=self.open_scanner).pack(side='right')
 
     def _build(self):
         top = tk.Frame(self, bg=self.BG, padx=15, pady=10)
@@ -82,10 +83,11 @@ class LayoutMixin:
         db_row = tk.Frame(top, bg=self.BG)
         db_row.pack(fill='x', pady=(11, 4))
         self._label(db_row, self.parser.source_label, self.DIM).pack(side='left', padx=(0, 9))
-        ttk.Entry(db_row, textvariable=self.db_path).pack(side='left', fill='x', expand=True)
-        ttk.Button(db_row, text='Browse', command=self._browse_db).pack(side='left', padx=(7, 4))
-        self.load_button = ttk.Button(db_row, text='Load conversations', style='Accent.TButton', command=self._load)
-        self.load_button.pack(side='left')
+        self.source_entry = ttk.Entry(db_row, textvariable=self.db_path)
+        self.source_entry.pack(side='left', fill='x', expand=True)
+        self.source_entry.bind('<Return>', self._load_typed_source)
+        self.source_entry.bind('<KP_Enter>', self._load_typed_source)
+        ttk.Button(db_row, text='Browse', command=self._browse_db).pack(side='left', padx=(7, 0))
         if self.closable:
             ttk.Button(db_row, text='Close tab', command=lambda: self.winfo_toplevel().close_source_tab(self)).pack(
                 side='left', padx=(6, 0)
@@ -140,6 +142,7 @@ class LayoutMixin:
         sidebar_hscroll.grid(row=1, column=0, sticky='ew')
         self.conversations.bind('<<TreeviewSelect>>', self._select_thread)
         source_prompt = 'No source selected' if self.sidebar_columns else 'No database selected'
+        source_prompt = getattr(self.parser, 'sidebar_empty_text', source_prompt)
         self.sidebar_info = self._label(left, source_prompt, self.DIM,
                                        ('Consolas', 9), justify='left', wraplength=280)
         self.sidebar_info.pack(anchor='w', pady=(10, 0))
@@ -159,15 +162,7 @@ class LayoutMixin:
         self.thread_rollout.pack(fill='x', pady=(2, 0))
         nav = tk.Frame(right, bg=self.BG, padx=15, pady=4)
         nav.pack(fill='x')
-        self._label(nav, 'View:', self.DIM).pack(side='left', padx=(0, 8))
-        self.view_mode = 'Tree'
-        self.view_buttons = {}
-        for mode in ('Tree', 'Conversation'):
-            button = ttk.Button(nav, text=mode, width=len(mode) + 1,
-                                style='Accent.TButton' if mode == self.view_mode else 'TButton',
-                                command=lambda choice=mode: self._set_view_mode(choice))
-            button.pack(side='left')
-            self.view_buttons[mode] = button
+        self._label(nav, 'Turn:', self.DIM).pack(side='left', padx=(0, 8))
         self.turn_options = ttk.Combobox(nav, state='readonly', width=18, values=['Entire conversation'])
         self.turn_options.pack(side='left', fill='x', expand=True)
         self.turn_options.current(0)

@@ -1,5 +1,6 @@
 """Write bounded, non-overwriting copies of Claude evidence."""
 
+import base64
 import ntpath
 from pathlib import Path
 
@@ -11,6 +12,15 @@ from .paths import SESSION_ID
 
 def filename(path):
     return ntpath.basename(path.rstrip('/\\')) or 'file'
+
+
+def decode_base64(encoded):
+    if not isinstance(encoded, str) or len(encoded) > 4 * ((MAX_FILE_BYTES + 2) // 3):
+        raise ValueError('Missing or oversized Base64 content')
+    blob = base64.b64decode(encoded, validate=True)
+    if not blob or len(blob) > MAX_FILE_BYTES:
+        raise ValueError('Empty or oversized Base64 content')
+    return blob
 
 
 class Artifacts(ArtifactStore):

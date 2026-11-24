@@ -11,7 +11,7 @@ from .events import (
 )
 from .paths import rollout_for_thread
 from .recovery import _recover_file_changes
-from .metadata import prompt_permissions
+from .metadata import prompt_permission_mode, prompt_permissions
 from ...core.export import ExportSession
 from ...core.utils import short
 
@@ -21,7 +21,7 @@ def reconstruct_from_thread(db_path: Path, thread: dict, root: Path, progress=No
     source = rollout_for_thread(db_path, thread)
     destination = ExportSession.from_thread(root, 'Codex', thread)
     extractor = AttachmentExtractor(destination)
-    messages, calls, outputs, activities = [], [], [], []
+    messages, calls, outputs, activities, tool_files = [], [], [], [], []
     valid, invalid, max_ordinal = 0, 0, -1
     session = {}
     contexts = {}
@@ -56,7 +56,9 @@ def reconstruct_from_thread(db_path: Path, thread: dict, root: Path, progress=No
             if record.get('type') == 'turn_context':
                 turn_id = payload.get('turn_id') or active_turn
                 if turn_id:
-                    contexts.setdefault(turn_id, []).append((line_no, prompt_permissions(payload)))
+                    contexts.setdefault(turn_id, []).append(
+                        (line_no, prompt_permissions(payload), prompt_permission_mode(payload))
+                    )
             ordinal = record.get('ordinal')
             if not isinstance(ordinal, int) or isinstance(ordinal, bool) or ordinal < 0:
                 continue
@@ -76,6 +78,15 @@ def reconstruct_from_thread(db_path: Path, thread: dict, root: Path, progress=No
                 calls.append(c)
             if (o := normalize_output(record)):
                 outputs.append(o)
+                for attachment in o['attachments']:
+                    if attachment['status'] == 'extracted':
+                        tool_files.append({
+                            'kind': 'activity', 'activity_type': 'file_attachment',
+                            'ordinal': o['ordinal'], 'timestamp': o['timestamp'], 'turn_id': o['turn_id'],
+                            'raw': raw, 'attachments': [attachment],
+                            'file_links': [{'filename': attachment.get('original_filename', attachment['filename']),
+                                            'saved_path': attachment['saved_path'], 'suffix': '· extracted copy'}],
+                        })
             if (a := normalize_activity(record)):
                 a['raw'] = raw
                 activities.append(a)
@@ -87,8 +98,11 @@ def reconstruct_from_thread(db_path: Path, thread: dict, root: Path, progress=No
         if message['role'] == 'user':
             snapshots = contexts.get(message['turn_id'], ())
             # The first context record can follow the prompt in the same turn.
-            position = bisect_right(snapshots, line, key=lambda snapshot: snapshot[0])
-            message['permissions'] = snapshots[max(0, position - 1)][1] if snapshots else 'Not recorded'
+            details = mode = 'Not recorded'
+            if snapshots:
+                position = bisect_right(snapshots, line, key=lambda snapshot: snapshot[0])
+                _, details, mode = snapshots[max(0, position - 1)]
+            message.update(permissions=details, permission_mode=mode)
     # Keep this correlation pass even though calls/outputs are not rendered.
     # call_id + output ordinal delimit candidate executions; command matching
     # then associates each activity with its likely parent tool call.
@@ -98,7 +112,7 @@ def reconstruct_from_thread(db_path: Path, thread: dict, root: Path, progress=No
     # They are intentionally omitted from the conversation UI because the
     # execution/activity records already contain the useful command/result
     # details and rendering both creates duplicate, expensive blocks.
-    entries = messages + activities
+    entries = messages + activities + tool_files
     entries.sort(key=lambda x: x['ordinal'])
     by_turn = {}
     for e in entries:
@@ -126,7 +140,7 @@ def reconstruct_from_thread(db_path: Path, thread: dict, root: Path, progress=No
     summary = {
         'total_records': valid, 'invalid_json': invalid, 'max_ordinal': max_ordinal,
         'turns': len(turns), 'messages': len(messages), 'tool_calls': len(calls),
-        'activities': len(activities), 'attachments': len(extractor.entries),
+        'activities': len(activities) + len(tool_files), 'attachments': len(extractor.entries),
         'recovered_files': len(recovered),
     }
     return {'thread': thread, 'source_path': str(source), 'output_directory': str(destination.directory),

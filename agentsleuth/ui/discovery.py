@@ -33,7 +33,6 @@ class ScanDialog(tk.Toplevel):
         bar.grid(row=0, column=0, sticky='ew')
         ttk.Button(bar, text='Scan this PC', command=lambda: self.start(None)).pack(side='left')
         ttk.Button(bar, text='Scan evidence folder…', command=self.choose).pack(side='left', padx=6)
-        ttk.Button(bar, text='Cancel scan', command=self.cancel).pack(side='right')
         ttk.Label(self, textvariable=self.status, padding=8, wraplength=490).grid(row=1, column=0, sticky='ew')
         frame = ttk.Frame(self)
         frame.grid(row=2, column=0, sticky='nsew', padx=8)
@@ -54,10 +53,12 @@ class ScanDialog(tk.Toplevel):
         self.table.grid(row=0, column=0, sticky='nsew')
         footer = ttk.Frame(self, padding=(8, 6))
         footer.grid(row=3, column=0, sticky='ew')
-        ttk.Label(footer, text='Check the folders you want to open').pack(side='left')
         self.open_button = ttk.Button(footer, text='Open selected', style='Accent.TButton',
                                       state='disabled', command=self.open_source)
         self.open_button.pack(side='right')
+        self.select_all_button = ttk.Button(footer, text='Select all', width=15, state='disabled',
+                                             command=self._toggle_all)
+        self.select_all_button.pack(side='right', padx=(0, 6))
         self.table.bind('<Button-1>', self._click_checkbox)
         self.table.bind('<Double-1>', self._open_clicked_source)
         self.table.bind('<Return>', self.open_source)
@@ -69,27 +70,26 @@ class ScanDialog(tk.Toplevel):
         if value:
             self.start(Path(value).resolve())
 
-    def cancel(self):
-        if self.job:
+    def _stop_scan(self):
+        if self.job is not None:
             self.job.set()
-            self.status.set('Cancelling scan…')
-
-    def destroy(self):
-        self.cancel()
+            self.job = None
         if self.timer is not None:
             self.after_cancel(self.timer)
+            self.timer = None
+
+    def destroy(self):
+        self._stop_scan()
         super().destroy()
 
     def start(self, root):
-        self.cancel()
-        if self.timer is not None:
-            self.after_cancel(self.timer)
+        self._stop_scan()
         job = self.job = threading.Event()
         events = queue.Queue()
         self.root_path = root
         self.findings = []
         self.table.delete(*self.table.get_children())
-        self.open_button.configure(state='disabled')
+        self._set_checked(set())
         self.status.set(f'Scanning {root or "known agent locations on this PC"}…')
         def work():
             try:
@@ -120,8 +120,9 @@ class ScanDialog(tk.Toplevel):
                         self.table.insert('', 'end', iid=str(idx), values=(mark, hit.agent, str(hit.path), hit.status))
                     if self.findings and self.findings[0].source:
                         self.table.focus('0')
-                    state = 'Cancelled' if job.is_set() else 'Complete'
-                    self.status.set(f'{state} · {len(self.findings):,} agent folders · {skipped:,} inaccessible directories')
+                    self._set_checked(set())
+                    self.status.set(f'Complete · {len(self.findings):,} agent folders · '
+                                    f'{skipped:,} inaccessible directories')
                     return
             except queue.Empty:
                 self.timer = self.after(100, poll)
@@ -136,6 +137,17 @@ class ScanDialog(tk.Toplevel):
             self.table.set(row, 'check', CHECKED)
         self.table.selection_set(*rows)
         self.open_button.configure(state='normal' if rows else 'disabled')
+        available = self._available_rows()
+        all_checked = bool(available) and rows == available
+        self.select_all_button.configure(text='Clear selection' if all_checked else 'Select all',
+                                         state='normal' if available else 'disabled')
+
+    def _available_rows(self):
+        return {str(index) for index, hit in enumerate(self.findings) if hit.source is not None}
+
+    def _toggle_all(self):
+        available = self._available_rows()
+        self._set_checked(set() if set(self.table.selection()) == available else available)
 
     def _toggle(self, row):
         if row and self.findings[int(row)].source is not None:
@@ -158,7 +170,7 @@ class ScanDialog(tk.Toplevel):
         return 'break'
 
     def _select_all(self, _event=None):
-        self._set_checked({str(index) for index, hit in enumerate(self.findings) if hit.source is not None})
+        self._set_checked(self._available_rows())
         return 'break'
 
     def _open_clicked_source(self, event):

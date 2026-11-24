@@ -1,3 +1,4 @@
+import base64
 import json
 import shutil
 import sqlite3
@@ -71,19 +72,32 @@ class AgentSleuthCoreTests(unittest.TestCase):
             ('turn_context', dict(turn_id='a', sandbox_policy={'type': 'read-only'})),
             prompt('a', 'second'),
             ('event_msg', dict(type='task_started', turn_id='b')),
-            ('turn_context', dict(sandbox_policy={'type': 'danger-full-access'}, approval_policy='never')),
+            ('turn_context', dict(sandbox_policy={'type': 'danger-full-access'},
+                                  active_permission_profile={'id': ':danger-full-access'}, approval_policy='never')),
             prompt('', 'third'),
             ('event_msg', dict(type='task_complete', turn_id='b')),
             prompt('c', 'fourth'),
+            ('turn_context', dict(turn_id='d', active_permission_profile={'id': ':workspace'})),
+            prompt('d', 'fifth'),
         ]
         self.rollout.write_text('\n'.join(json.dumps(dict(type=t, ordinal=i, payload=p))
                                           for i, (t, p) in enumerate(records)), encoding='utf-8')
         result = reconstruct_from_thread(self.db, load_threads(self.db)[0], self.root / 'results')
-        labels = {e['text']: e['permissions'] for turn in result['turns'] for e in turn['entries']}
+        prompts = {e['text']: e for turn in result['turns'] for e in turn['entries']}
+        labels = {text: entry['permissions'] for text, entry in prompts.items()}
         self.assertEqual(labels, {
             'first': ':workspace · workspace-write · Network: restricted · Approval: on-request',
-            'second': 'read-only', 'third': 'danger-full-access · Approval: never',
+            'second': 'read-only',
+            'third': ':danger-full-access · danger-full-access · Approval: never',
             'fourth': 'Not recorded',
+            'fifth': ':workspace',
+        })
+        self.assertEqual({text: entry['permission_mode'] for text, entry in prompts.items()}, {
+            'first': 'workspace-write',
+            'second': 'read-only',
+            'third': 'danger-full-access',
+            'fourth': 'Not recorded',
+            'fifth': 'workspace',
         })
 
     def test_file_markers_become_filename_and_path(self):
@@ -129,6 +143,35 @@ class AgentSleuthCoreTests(unittest.TestCase):
         self.assertTrue(all(entry['agent'] == 'codex' and entry['session_id'] for entry in entries))
         self.assertEqual(command_executions[0]['raw']['payload']['item']['type'], 'CommandExecution')
         self.assertEqual(command_executions[0]['call_id'], 'call_example_001')
+
+    def test_recovers_named_files_in_prompts_and_tool_outputs(self):
+        prompt_file = b'{"ok":true}'
+        output_file = bytes(range(16))
+        records = [
+            dict(type='message', role='user', content=[
+                dict(type='input_text', text='Check this file'),
+                dict(type='input_file', filename='config.json', file_data=base64.b64encode(prompt_file).decode()),
+            ]),
+            dict(type='function_call', name='example', call_id='call', arguments='{}'),
+            dict(type='function_call_output', call_id='call', output=[
+                dict(type='input_file', filename='../example.bin',
+                     file_data='data:application/octet-stream;base64,' + base64.b64encode(output_file).decode()),
+            ]),
+        ]
+        self.rollout.write_text('\n'.join(json.dumps(dict(type='response_item', ordinal=i,
+                                                        payload=dict(turn_id='turn', **record)))
+                                          for i, record in enumerate(records)), encoding='utf-8')
+        result = reconstruct_from_thread(self.db, load_threads(self.db)[0], self.root / 'results')
+        prompt, tool_file = result['turns'][0]['entries']
+        upload, = prompt['attachments']
+        self.assertEqual(upload['original_filename'], 'config.json')
+        self.assertEqual(Path(upload['saved_path']).read_bytes(), prompt_file)
+        self.assertEqual(Path(upload['saved_path']).suffix, '.json')
+        self.assertEqual((tool_file['activity_type'], tool_file['ordinal'], tool_file['call_id']),
+                         ('file_attachment', 2, 'call'))
+        link, = tool_file['file_links']
+        self.assertEqual(link['filename'], 'example.bin')
+        self.assertEqual(Path(link['saved_path']).read_bytes(), output_file)
 
 
 if __name__ == "__main__":

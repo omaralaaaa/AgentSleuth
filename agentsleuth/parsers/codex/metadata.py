@@ -8,18 +8,32 @@ def get_turn(record):
     return payload.get("turn_id") or passthrough.get("turn_id") or ""
 
 
+def _field(value, key):
+    return value.get(key) if isinstance(value, dict) else value
+
+
+def prompt_permission_mode(payload):
+    """Pick the recorded sandbox mode or permission profile for the prompt label."""
+    profile = payload.get('permission_profile')
+    filesystem = _field(profile.get('file_system'), 'type') if isinstance(profile, dict) else None
+    profile_type = _field(profile, 'type')
+    for value in (_field(payload.get('sandbox_policy'), 'type'),
+                  _field(payload.get('active_permission_profile'), 'id'),
+                  filesystem, profile_type if profile_type != 'managed' else None):
+        if isinstance(value, str) and (label := value.strip().lstrip(':')):
+            return label
+    return 'Not recorded'
+
+
 def prompt_permissions(payload):
     """Describe only fields recorded in this turn's permission snapshot."""
-    def field(value, key):
-        return value.get(key) if isinstance(value, dict) else value
-
-    active = field(payload.get('active_permission_profile'), 'id')
+    active = _field(payload.get('active_permission_profile'), 'id')
     sandbox = payload.get('sandbox_policy')
     profile = payload.get('permission_profile')
-    mode = field(sandbox, 'type')
+    mode = _field(sandbox, 'type')
     parts = [str(v) for v in (active, mode) if v]
     if not mode and isinstance(profile, dict):
-        filesystem = field(profile.get('file_system'), 'type')
+        filesystem = _field(profile.get('file_system'), 'type')
         if filesystem:
             parts.append(f'Filesystem: {filesystem}')
         elif profile.get('type') and profile['type'] != 'managed':

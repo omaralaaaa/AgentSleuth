@@ -8,5 +8,4 @@ source_label = 'History index'
 source_hint = 'Select a Claude Code history.jsonl file'
 filetypes = [('Claude Code history', '*.jsonl'), ('All files', '*.*')]
 transcript_label = 'Claude Code transcript'
-sidebar_columns = (('cwd', 'Project', 140), ('updated_label', 'Last history (UTC)', 190),
-                   ('created_label', 'First history (UTC)', 190), ('history_status', 'Transcript', 145))
+sidebar_empty_text = 'No source selected'

@@ -2,7 +2,7 @@
 
 import re
 
-from .artifacts import MAX_FILE_BYTES, filename
+from .artifacts import MAX_FILE_BYTES, decode_base64, filename
 from .paths import local_directory, within
 from .records import object_value, string_value
 
@@ -16,6 +16,21 @@ def _save(result, content, artifacts, category='recovered_files'):
     except (ValueError, OSError, RuntimeError) as error:
         result.update(error=str(error), suffix=result['suffix'] + ' · copy unavailable')
     return result
+
+
+def _binary_read_content(recorded_file, kind):
+    if recorded_file.get('truncated') is True:
+        raise ValueError('Recorded file content is truncated')
+    blob = decode_base64(recorded_file['base64'])
+    size = recorded_file.get('originalSize')
+    if size is not None and (type(size) is not int or size != len(blob)):
+        raise ValueError('Recorded bytes do not match the original file size')
+    if kind == 'pdf':
+        if b'%PDF-' not in blob[:1024]:
+            raise ValueError('Recorded PDF header is missing')
+        if size is None and not blob.rstrip().endswith(b'%%EOF'):
+            raise ValueError('Recorded PDF end marker is missing')
+    return blob
 
 
 def operation(execution, metadata, artifacts):
@@ -32,8 +47,19 @@ def operation(execution, metadata, artifacts):
     result = {'original_path': original, 'filename': filename(original), 'saved_path': None,
               'operation': tool, 'status': status, 'suffix': '· recorded path'}
     if tool == 'read':
+        if status != 'completed':
+            return result
+        if 'base64' in read_file and metadata.get('truncated') is not True:
+            kind = metadata.get('type')
+            try:
+                blob = _binary_read_content(read_file, kind)
+            except ValueError as error:
+                result.update(error=str(error), suffix='· recorded file copy unavailable')
+                return result
+            result['suffix'] = '· copied recorded PDF' if kind == 'pdf' else '· copied recorded Read bytes'
+            return _save(result, blob, artifacts)
         content = read_file.get('content')
-        if (status == 'completed' and metadata.get('type') == 'text' and isinstance(content, str)
+        if (metadata.get('type') == 'text' and isinstance(content, str)
                 and read_file.get('startLine') == 1 and isinstance(read_file.get('totalLines'), int)
                 and read_file.get('numLines') == read_file['totalLines']):
             result['suffix'] = '· copied recorded Read content'
