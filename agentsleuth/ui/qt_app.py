@@ -9,8 +9,8 @@ import sys
 from threading import Event
 from time import perf_counter, sleep
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QFontDatabase, QKeySequence, QShortcut
+from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtGui import QFont, QFontDatabase, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLineEdit,
     QMainWindow, QProgressBar, QSplitter, QTabWidget, QTreeWidgetItem,
@@ -464,6 +464,8 @@ class Viewer(QMainWindow):
         except (OSError, RuntimeError, ValueError) as error:
             export_error = f'Could not validate export directory · {error}'
         self.setWindowTitle('AgentSleuth — Agent Conversation Viewer')
+        logo = QIcon(str(Path(__file__).with_name('assets') / 'agentsleuth-logo.png'))
+        self.setWindowIcon(logo)
         self.resize(1390, 830)
         self.setMinimumSize(900, 620)
         self.scanner = None
@@ -476,8 +478,8 @@ class Viewer(QMainWindow):
         masthead.setObjectName('panel')
         heading = QHBoxLayout(masthead)
         heading.setContentsMargins(12, 6, 15, 6)
-        mark = evidence_label('>_', '#99b5d3', 14, True)
-        mark.setFixedWidth(29)
+        mark = evidence_label('')
+        mark.setPixmap(logo.pixmap(QSize(40, 40), self.devicePixelRatioF()))
         heading.addWidget(mark)
         heading.addWidget(evidence_label('AGENTSLEUTH', points=19, bold=True))
         heading.addStretch()

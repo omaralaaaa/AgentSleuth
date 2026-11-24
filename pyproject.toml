@@ -15,5 +15,8 @@ agentsleuth = "agentsleuth.ui.qt_app:main"
 [tool.setuptools.packages.find]
 include = ["agentsleuth*"]
 
+[tool.setuptools.package-data]
+"agentsleuth.ui" = ["assets/*.png"]
+
 [tool.ruff]
 line-length = 100
