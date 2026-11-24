@@ -7,13 +7,15 @@ from collections import defaultdict
 from contextlib import closing
 from pathlib import Path
 
-from ...core.export import session_directory
+from ...core.export import ExportSession
 from ...core.artifacts import ArtifactStore
 from ...core.utils import safe_text, short
 from .attachments import recover_uploads
+from .scratch import recover_scratch, scratch_directory
 
 
 TRANSCRIPT = Path('.system_generated/logs/transcript.jsonl')
+SESSION_ID = re.compile(r'[A-Za-z0-9_-]{1,160}')
 TOOL_DISPLAY_METADATA = {'toolSummary', 'toolAction', 'WaitMsBeforeAsync'}
 PROMPT_TAG = re.compile(r'<(/?)(USER_REQUEST|ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)'
                         r'[ \t]*(?:>|(?=\r?$))', re.MULTILINE)
@@ -75,12 +77,16 @@ def _connect(path):
 
 
 def _related(root, session_id, source):
-    if re.fullmatch(r'[A-Za-z0-9_-]{1,160}', session_id):
+    if SESSION_ID.fullmatch(session_id):
         for path in (root / 'brain' / session_id / TRANSCRIPT,
                      root / 'conversations' / (session_id + '.db')):
             if path.resolve().is_relative_to(root) and path.is_file():
                 return path.resolve()
     return source
+
+
+def _brain_session(root, session_id):
+    return root / 'brain' / session_id if SESSION_ID.fullmatch(session_id) else None
 
 
 def load_threads(path):
@@ -102,8 +108,12 @@ def load_threads(path):
                 if source != path:
                     ids.add(sid)
                     threads.append(dict(id=sid, name=sid, export_title='', cwd='', source_detail=str(source)))
+                elif (scratch := scratch_directory(_brain_session(path, sid))) is not None:
+                    ids.add(sid)
+                    threads.append(dict(id=sid, name=sid, export_title='', cwd='',
+                                        source_detail=f'Scratch files · {scratch}'))
         if not threads:
-            raise ValueError('No generated transcripts or supported trajectory databases in this folder.')
+            raise ValueError('No generated transcripts, trajectory databases, or session scratch folders found.')
         return sorted(threads, key=lambda t: t['id'])
     if path.suffix.lower() == '.jsonl':
         sid = path.parents[2].name if path.as_posix().endswith('/' + TRANSCRIPT.as_posix()) else path.stem
@@ -160,25 +170,34 @@ _USER_REQUEST = re.compile(
 def reconstruct_from_thread(path, thread, output_root=None, progress=None):
     path = Path(path).resolve()
     source = path
+    evidence_root = None
     if path.is_dir():
-        source = _related(path, thread['id'], path)
-        if source == path:
-            raise FileNotFoundError('Session evidence is missing from the selected folder.')
+        evidence_root = path
     elif thread.get('indexed'):
-        source = _related(path.parent, thread['id'], path)
+        evidence_root = path.parent
     elif path.parent.name == 'conversations' and path.suffix.lower() == '.db':
-        source = _related(path.parent.parent, thread['id'], path)
+        evidence_root = path.parent.parent
+    if evidence_root is not None:
+        source = _related(evidence_root, thread['id'], path)
+
     turns, user_records = [], []
     attachments = []
-    session = source.parents[2] if source.as_posix().endswith('/' + TRANSCRIPT.as_posix()) else None
+    session = None
+    if source.as_posix().endswith('/' + TRANSCRIPT.as_posix()):
+        session = source.parents[2]
+    elif evidence_root is not None:
+        session = _brain_session(evidence_root, thread['id'])
+    scratch = scratch_directory(session)
+    if source.is_dir() and scratch is None:
+        raise FileNotFoundError('Session evidence is missing from the selected folder.')
+
     store = None
     if output_root is not None:
-        title = thread.get('export_title', thread.get('name'))
-        destination = session_directory(output_root, 'Antigravity', thread['id'], title)
-        store = ArtifactStore(destination, [session.parent.parent if session else source.parent])
+        protected = evidence_root or (session.parent.parent if session else source.parent)
+        store = ArtifactStore(ExportSession.from_thread(output_root, 'Antigravity', thread), [protected])
     ordinal = activities = tool_calls = messages = 0
     indexed_only = thread.get('indexed') and source == path
-    records = () if indexed_only else _records(source)
+    records = () if indexed_only or source.is_dir() else _records(source)
     for n, step in enumerate(records, 1):
         if progress and n % 200 == 0:
             progress(f'Reading Antigravity evidence · {n:,} steps')
@@ -228,17 +247,34 @@ def reconstruct_from_thread(path, thread, output_root=None, progress=None):
             entry['ordinal'] = ordinal
             activities += entry['kind'] == 'activity'
             turns[-1]['entries'].append(entry)
+
+    scratch_files = list(recover_scratch(scratch, store, progress))
+    if scratch_files:
+        scratch_entries = []
+        for file in scratch_files:
+            ordinal += 1
+            scratch_entries.append(dict(agent='antigravity', kind='activity', activity_type='scratch_file',
+                                        ordinal=ordinal, scratch_file=file, text=file.get('preview') or '',
+                                        file_links=[file]))
+        turns.append(dict(turn_id=f'{thread["id"]}:scratch', title='Scratch files',
+                          entries=scratch_entries, first_ordinal=scratch_entries[0]['ordinal']))
+        activities += len(scratch_entries)
+    recovered = [file for file in scratch_files if file['status'] == 'recovered']
+
     detail = str(source)
-    if indexed_only:
+    if (indexed_only or source.is_dir()) and scratch is not None:
+        detail = f'Scratch files only · {scratch}'
+    elif indexed_only:
         detail = 'Summary only · no generated transcript or readable trajectory database beside this index'
     elif source.suffix.lower() == '.db':
         detail += ' · step metadata only (binary payloads are not decoded)'
     return dict(thread=thread, turns=turns, user_records=user_records,
                 attachments=attachments,
+                scratch_files=scratch_files, recovered_files=recovered,
                 attachment_failures=[a for a in attachments if a['status'] == 'unavailable'],
                 output_directory=str(store.directory) if store else None,
                 source_path=str(source), source_detail=detail,
                 summary=dict(turns=len(turns), activities=activities, messages=messages,
                              tool_calls=tool_calls, max_ordinal=ordinal,
                              attachments=sum(a['status'] == 'extracted' for a in attachments),
-                             recovered_files=0))
+                             recovered_files=len(recovered)))

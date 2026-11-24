@@ -29,6 +29,7 @@ def card_heading(entry, agent_name):
             'reasoning': 'RECORDED REASONING',
             'file_attachment': 'FILE ATTACHMENT',
             'file_change': 'FILE CHANGE ARTIFACT',
+            'scratch_file': 'SCRATCH FILE',
             'raw_part': 'PART EVIDENCE',
             'raw_message': 'MESSAGE EVIDENCE',
         }
@@ -72,6 +73,12 @@ class CardContentMixin:
         elif entry.get('agent') == 'antigravity' and entry.get('part_type') == 'Tool request':
             self._field(card, 'Tool', entry.get('tool_name'))
             self._field(card, 'Input', entry.get('tool_arguments') or None, multiline=True)
+        elif file := entry.get('scratch_file'):
+            self._field(card, 'Bytes', file['size_bytes'])
+            self._field(card, 'SHA-256', file.get('sha256'))
+            self._field(card, 'Extraction error', file.get('error'))
+            label = 'File preview (first 64 KiB)' if file.get('preview_truncated') else 'Recorded file content'
+            self._field(card, label, file.get('preview'), multiline=True)
         elif entry.get('event_type') == 'file_attachment' and entry.get('attachments'):
             upload = entry['attachments'][0]
             self._field(card, 'MIME type', upload.get('mime'))

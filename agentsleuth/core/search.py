@@ -28,6 +28,8 @@ def filter_values(entry):
         values.add('File changes')
     elif activity == 'file_attachment':
         values.add('Attachments')
+    elif activity == 'scratch_file':
+        values.add('Scratch files')
     elif activity == 'ERROR_MESSAGE':
         values.add('Errors')
     if entry.get('attachments') or entry.get('file_refs') or any(

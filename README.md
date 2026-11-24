@@ -44,7 +44,7 @@ Each result represents one agent folder. Use the row checkboxes or the **Select 
 
 ## Interpret the results
 
-AgentSleuth creates export folders when it saves an artifact. Files go under the agent and conversation title, in `attachments/` or `recovered_files/` according to the artifact type. When a title folder is already taken, AgentSleuth adds a short session ID suffix.
+AgentSleuth creates export folders when it saves an artifact. Files go under the agent and conversation title. Attachments go to `attachments/`, recovered file changes go to `recovered_files/`, and Antigravity scratch files go to `scratch/`. When a title folder is already taken, AgentSleuth adds a short session ID suffix.
 
 When a selected conversation has exported files, **Open export folder** opens its session directory. **Uploads by prompt** lists the recorded uploads beneath their prompts and shows the corresponding exported filenames. Select a prompt or file to read the full prompt text.
 
@@ -73,8 +73,9 @@ On the inspected Windows installation, the index is under `%USERPROFILE%\.gemini
 | `brain/<session-id>/.system_generated/logs/transcript.jsonl` | User prompts, planner replies, tool requests, recorded step output and errors. Each step retains its source index when available. Truncation markers identify incomplete source fields. |
 | `conversations/<session-id>.db` with a `steps` table | Ordered step indexes and recorded numeric type/status values. Binary step payloads are not decoded. |
 | Summary index only | Session title and recorded workspace. Selecting the session explains why transcript content is unavailable. |
+| `brain/<session-id>/scratch/` | A **Scratch files** section with searchable text previews and byte-for-byte copies in the session's `scratch/` export folder. |
 
-Generated JSONL takes precedence over SQLite step metadata. Keep each session's `.user_uploaded/` folder alongside `.system_generated/` to export uploads linked to user prompts. Requests and result steps remain separate when the transcript provides no matching call ID. Standalone legacy `.pb` conversations are unsupported.
+Generated JSONL takes precedence over SQLite step metadata. Keep each session's `.user_uploaded/` and `scratch/` folders alongside `.system_generated/`. Uploads are linked to their recorded prompts. Scratch files belong to the session and can be recovered even if the transcript is missing. The viewer shows relative paths and previews up to 64 KiB of readable text. Recovery skips symlinks, junctions, dependency directories, and common caches. Requests and result steps remain separate when the transcript provides no matching call ID. Standalone legacy `.pb` conversations are unsupported.
 
 ## Troubleshooting
 

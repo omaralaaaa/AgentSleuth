@@ -47,7 +47,7 @@ def export_folder(result):
     if not (value := result.get('output_directory')):
         return None
     directory = Path(value)
-    for name in ('attachments', 'recovered_files'):
+    for name in ('attachments', 'recovered_files', 'scratch'):
         subfolder = directory / name
         try:
             if subfolder.resolve() == subfolder and any(
