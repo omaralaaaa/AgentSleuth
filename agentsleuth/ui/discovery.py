@@ -59,7 +59,7 @@ class ScanDialog(tk.Toplevel):
         self.select_all_button = ttk.Button(footer, text='Select all', width=15, state='disabled',
                                              command=self._toggle_all)
         self.select_all_button.pack(side='right', padx=(0, 6))
-        self.table.bind('<Button-1>', self._click_checkbox)
+        self.table.bind('<Button-1>', self._click_row)
         self.table.bind('<Double-1>', self._open_clicked_source)
         self.table.bind('<Return>', self.open_source)
         self.table.bind('<space>', self._toggle_focused)
@@ -157,9 +157,10 @@ class ScanDialog(tk.Toplevel):
         return (self.table.identify_region(event.x, event.y) == 'cell'
                 and self.table.identify_column(event.x) == '#1')
 
-    def _click_checkbox(self, event):
-        if self._checkbox_at(event):
-            row = self.table.identify_row(event.y)
+    def _click_row(self, event):
+        if self.table.identify_region(event.x, event.y) != 'cell':
+            return
+        if row := self.table.identify_row(event.y):
             self.table.focus_set()
             self.table.focus(row)
             self._toggle(row)

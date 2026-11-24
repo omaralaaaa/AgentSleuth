@@ -1,6 +1,6 @@
-"""Alternative launcher: python main.py"""
+"""Launch the AgentSleuth desktop viewer."""
 
-from agentsleuth.ui.app import main
+from agentsleuth.ui.qt_app import main
 
 if __name__ == "__main__":
-    main(__file__)
+    raise SystemExit(main(__file__))

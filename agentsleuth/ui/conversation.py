@@ -1,7 +1,5 @@
 """Render reconstructed messages and correlated execution/activity cards."""
 
-import json
-import ntpath
 import os
 import subprocess
 import sys
@@ -15,13 +13,15 @@ from ..core.paths import _path_from_stored
 from ..core.utils import safe_text
 from .powershell import insert_command
 from .render_plan import build_plan
-from .shell import shell_arguments
+from .card_content import CardContentMixin, card_heading
+from ..core.upload_listing import attachment_links
+from .windows_explorer import reveal_file
 
 
 
 
 
-class ConversationMixin:
+class ConversationMixin(CardContentMixin):
     def _schedule_search(self, *_):
         if self._search_timer is not None:
             self.after_cancel(self._search_timer)
@@ -224,6 +224,11 @@ class ConversationMixin:
             anchor='w', padx=13, pady=(7, 1))
         self._body(panel, value, panel.cget('bg'), max_rows=9, monospace=True, command_styles=command_styles)
 
+    def _card_permissions(self, card, permission):
+        self._label(card, f'Permissions: {permission}', self.DIM, ('Consolas', 9),
+                    anchor='w', justify='left', wraplength=max(300, self.canvas.winfo_width() - 100)
+                    ).pack(fill='x', padx=13, pady=(2, 4))
+
     def _render_entry(self, entry):
         kind = entry['kind']
         is_message = kind == 'message'
@@ -243,72 +248,13 @@ class ConversationMixin:
         card.pack(fill='x', expand=True, pady=(0 if user else 3, 0))
         header = tk.Frame(card, bg=bg)
         header.pack(fill='x', padx=13, pady=(10, 2))
-        if entry.get('event_type') == 'assistant_error' and entry.get('agent') in ('opencode', 'claude'):
-            label = 'AGENT ERROR'
-        elif is_message:
-            speaker = 'AGENT' if entry.get('agent') == 'claude' else self.parser.name.upper()
-            label = 'USER' if user else speaker + (' · ' + entry['phase'] if entry.get('phase') else '')
-        elif entry.get('agent') == 'claude' and 'execution' in entry:
-            label = 'EXECUTION · ' + (entry['execution']['tool'] or 'TOOL')[:48].upper()
-        else:
-            activity_labels = {
-                'CommandExecution': 'EXECUTION · COMMAND',
-                'FileChange': 'EXECUTION · FILE CHANGE',
-                'McpToolCall': 'EXECUTION · MCP TOOL',
-                'DynamicToolCall': 'EXECUTION · DYNAMIC TOOL',
-                'CollabAgentToolCall': 'EXECUTION · COLLAB AGENT',
-                'ToolExecution': 'EXECUTION · TOOL',
-                'reasoning': 'RECORDED REASONING',
-                'file_attachment': 'FILE ATTACHMENT',
-                'file_change': 'FILE CHANGE ARTIFACT',
-                'raw_part': 'PART EVIDENCE',
-                'raw_message': 'MESSAGE EVIDENCE',
-            }
-            label = activity_labels.get(
-                entry.get('activity_type'),
-                'ACTIVITY · ' + entry.get('activity_type', 'UNKNOWN')
-            )
+        label, meta = card_heading(entry, self.parser.name)
         self._label(header, label, self.ACCENT if is_message else self.DIM,
                     ('Consolas', 10, 'bold')).pack(side='left')
-        if 'timestamp_label' in entry:
-            timestamp = entry['timestamp_label']
-        else:
-            recorded = entry.get('timestamp') or ''
-            timestamp = recorded[:19].replace('T', ' ') + ' UTC' if recorded else ''
-        meta = f'#{entry["ordinal"]}' + (f'  ·  {timestamp}' if timestamp else '')
         self._label(header, meta, self.DIM, ('Consolas', 8)).pack(side='right')
-        if entry.get('agent') == 'antigravity' and not user:
-            self._field(card, 'Recorded step', entry.get('step_index'))
-            if entry.get('truncated_fields'):
-                self._field(card, 'Truncated in source', safe_text(entry['truncated_fields']))
+        self._populate_card(card, entry, bg)
         key = id(entry)
         count = self._index.response_counts.get(key, 0)
-        permission = entry.get('permission_mode', entry.get('permissions'))
-        if user and entry.get('agent') != 'opencode' and permission is not None:
-            self._label(card, f'Permissions: {permission}', self.DIM, ('Consolas', 9),
-                        anchor='w', justify='left', wraplength=max(300, self.canvas.winfo_width() - 100)
-                        ).pack(fill='x', padx=13, pady=(2, 4))
-        if is_message:
-            self._body(card, entry.get('text', ''), bg)
-            self._file_links(card, entry.get('file_refs', []), entry.get('attachments', []))
-        elif 'execution' in entry:
-            self._render_execution(card, entry)
-        elif entry.get('event_type') == 'file_attachment' and entry.get('attachments'):
-            upload = entry['attachments'][0]
-            self._field(card, 'MIME type', upload.get('mime'))
-            self._field(card, 'Bytes', upload.get('size_bytes'))
-            self._field(card, 'SHA-256', upload.get('sha256'))
-            self._field(card, 'Extraction error', upload.get('error'))
-        elif 'part_type' in entry:
-            self._field(card, 'Part type', entry.get('part_type'))
-            if 'text' in entry:
-                self._body(card, entry['text'], bg)
-            else:
-                self._field(card, 'Recorded evidence', entry['evidence'], multiline=True, show_empty=True)
-        else:
-            self._render_activity_fields(card, entry)
-        for file in entry.get('file_links', ()):
-            self._filename_link(card, file['filename'], file['saved_path'], file['suffix'])
         if user and count:
             def caption():
                 marker = '▸' if key in self._collapsed_prompts else '▾'
@@ -327,75 +273,6 @@ class ConversationMixin:
             button.pack(anchor='w', padx=8, pady=(0, 4))
         self._bind_conversation_wheel_tree(row)
 
-    def _render_execution(self, panel, entry):
-        execution = entry['execution']
-        self._field(panel, 'Tool', execution['tool'])
-        if arguments := shell_arguments(entry):
-            self._field(panel, 'Shell command', arguments['command'], multiline=True,
-                        command_styles=self._command_styles.pop(id(entry), None))
-            if entry.get('agent') == 'opencode':
-                other = {key: value for key, value in arguments.items()
-                         if key not in ('command', 'workdir', 'cwd', 'working_directory')}
-                self._field(panel, 'Other input', other or None, multiline=True)
-        else:
-            self._field(panel, 'Input', execution['arguments'], multiline=True, show_empty=True)
-        if execution['partial_input'] != execution['arguments']:
-            self._field(panel, 'Recorded partial input', execution['partial_input'], multiline=True)
-        self._field(panel, 'Recorded output', execution['output'], multiline=True, show_empty=True)
-        self._field(panel, 'Recorded error', execution['error'], multiline=True, show_empty=True)
-        status = execution['status']
-        self._field(panel, 'Status', status if status is not None else 'Not recorded')
-        if entry.get('agent') not in ('claude', 'opencode'):
-            self._field(panel, 'Started', execution['start_label'])
-            self._field(panel, 'Ended', execution['end_label'])
-            self._field(panel, 'Metadata', execution['metadata'], multiline=True, show_empty=True)
-
-    def _render_activity_fields(self, panel, activity):
-        kind = activity['activity_type']
-        hide_command_metadata = kind == 'CommandExecution' and activity.get('agent') == 'codex'
-        if not hide_command_metadata:
-            self._field(panel, 'Status', activity.get('status'))
-        if kind == 'CommandExecution':
-            if not hide_command_metadata:
-                self._field(panel, 'Process ID', activity.get('pid'))
-                self._field(panel, 'Working directory', activity.get('cwd'))
-                self._field(panel, 'Exit code', activity.get('exit_code'))
-            command = activity.get('command')
-            self._field(panel, 'Shell command', command, multiline=True,
-                        command_styles=self._command_styles.pop(id(activity), None))
-            output = activity.get('item', {}).get('aggregated_output')
-            if output:
-                self._field(panel, 'Command stdout/stderr (aggregated)', output, multiline=True)
-        elif kind == 'FileChange':
-            item = activity.get('item') or {}
-            for filename, change in (item.get('changes') or {}).items():
-                operation = (change or {}).get('type', 'change')
-                basename = ntpath.basename(str(filename).replace('/', '\\')) or str(filename)
-                recovered = None
-                if self.result:
-                    recovered = next((r for r in self.result.get('recovered_files', [])
-                                      if r['ordinal'] == activity['ordinal']
-                                      and r['original_path'] == filename), None)
-                if recovered:
-                    self._filename_link(
-                        panel, basename, Path(recovered['saved_path']),
-                        suffix=f'[{operation}] · rebuilt copy'
-                    )
-                else:
-                    self._field(panel, 'File', f'{basename}  [{operation}] · no rebuilt copy recorded')
-                if change and change.get('content'):
-                    self._field(panel, 'Recorded file content', change['content'], multiline=True)
-            self._field(panel, 'stdout', item.get('stdout'), multiline=True)
-            self._field(panel, 'stderr', item.get('stderr'), multiline=True)
-        else:
-            item = activity.get('item') or {}
-            for name in ('server', 'tool', 'name', 'arguments', 'result', 'error'):
-                if name in item:
-                    value = item[name]
-                    if isinstance(value, (list, dict)):
-                        value = json.dumps(value, indent=2, ensure_ascii=False)
-                    self._field(panel, name.capitalize(), value, multiline=name in {'arguments', 'result'})
-        self._file_links(panel, [], activity.get('attachments', []))
 
     def _filename_link(self, parent, filename, target=None, suffix=''):
         """Render a filename only; links always target a rebuilt/extracted copy."""
@@ -415,39 +292,12 @@ class ConversationMixin:
             label.bind('<Button-1>', lambda _e, path=Path(target): self._reveal_path(path))
 
     def _file_links(self, parent, file_refs, attachments):
-        """Show filename-only links to extracted copies, never original source paths."""
-        extracted = [a for a in attachments
-                     if a.get('status') == 'extracted' and a.get('filename')]
-        output_dir = (self.result or {}).get('output_directory')
-        attachment_dir = Path(output_dir) / 'attachments' if output_dir else None
-        used_ids = set()
-
-        # Match named files directly. Unnamed media can follow the marker order.
-        unnamed = iter(attachment for attachment in extracted if not attachment.get('original_filename'))
-        for ref in file_refs or []:
-            name = ref.get('filename')
-            fallback = next((attachment for attachment in extracted
-                             if name and attachment.get('original_filename') == name
-                             and attachment.get('attachment_id') not in used_ids), None)
-            if fallback is None:
-                fallback = next(unnamed, None)
-            target = (attachment_dir / fallback['filename']) if fallback and attachment_dir else None
-            if fallback:
-                used_ids.add(fallback.get('attachment_id'))
-            self._filename_link(
-                parent,
-                name or (fallback or {}).get('filename') or 'Attachment',
-                target,
-                suffix='· extracted copy' if target and target.is_file() else ''
-            )
-
-        # Attachments without a visible source-path marker use their extracted name.
-        for attachment in extracted:
-            if attachment.get('attachment_id') in used_ids:
-                continue
-            target = attachment_dir / attachment['filename'] if attachment_dir else None
-            self._filename_link(parent, attachment.get('original_filename', attachment['filename']),
-                                target, suffix='· extracted copy')
+        """Show filename-only links to extracted copies."""
+        directory = (self.result or {}).get('output_directory')
+        for link in attachment_links(file_refs or (), attachments, directory):
+            target = link.get('saved_path')
+            self._filename_link(parent, link['filename'], target,
+                                suffix='· extracted copy' if target and Path(target).is_file() else '')
 
     def _reveal_path(self, raw_path):
         """Navigate to a file in the OS file manager; never launch the file itself."""
@@ -465,7 +315,7 @@ class ConversationMixin:
                 if path.is_dir():
                     os.startfile(str(path))
                 else:
-                    subprocess.Popen(['explorer.exe', f'/select,{path}'])
+                    reveal_file(path)
             elif sys.platform == 'darwin':
                 if path.is_dir():
                     subprocess.Popen(['open', str(path)])

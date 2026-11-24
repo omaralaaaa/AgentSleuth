@@ -160,6 +160,13 @@ class LayoutMixin:
         self.thread_rollout = self._label(header, '', self.DIM, ('Consolas', 9),
                                           anchor='w', justify='left', wraplength=840)
         self.thread_rollout.pack(fill='x', pady=(2, 0))
+        self.export_actions = tk.Frame(header, bg=self.BG)
+        self._label(self.export_actions, 'Exported files available', self.ACCENT).pack(side='left')
+        ttk.Button(self.export_actions, text='Open export folder',
+                   command=self._open_export_folder).pack(side='left', padx=(8, 4))
+        ttk.Button(self.export_actions, text='Uploads by prompt',
+                   command=self._show_prompt_uploads).pack(side='left')
+        self.upload_dialog = None
         nav = tk.Frame(right, bg=self.BG, padx=15, pady=4)
         nav.pack(fill='x')
         self._label(nav, 'Turn:', self.DIM).pack(side='left', padx=(0, 8))

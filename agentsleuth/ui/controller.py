@@ -7,6 +7,8 @@ from tkinter import filedialog
 from ..core.utils import short
 from ..core.search import ALL_ENTRIES, TranscriptIndex
 from .worker import load_threads, reconstruct
+from ..core.upload_listing import export_folder
+from .uploads import UploadDialog
 
 
 class ControllerMixin:
@@ -163,10 +165,32 @@ class ControllerMixin:
             self.thread_rollout.configure(text=f'Session ID  {thread["id"]}')
 
     def _reset_view_options(self):
+        self.export_actions.pack_forget()
+        if self.upload_dialog is not None and self.upload_dialog.winfo_exists():
+            self.upload_dialog.destroy()
+        self.upload_dialog = None
         self.filter_options.configure(values=(ALL_ENTRIES,))
         self.turn_options.configure(values=['Entire conversation'])
         self.turn_options.current(0)
         self.conversation_stats.configure(text='')
+
+    def _session_export_folder(self):
+        directory = export_folder(self.result or {})
+        if directory is None:
+            self.export_actions.pack_forget()
+            self.status.set('No exported files are available for this conversation.')
+        return directory
+
+    def _open_export_folder(self):
+        if directory := self._session_export_folder():
+            self._reveal_path(directory)
+
+    def _show_prompt_uploads(self):
+        if directory := self._session_export_folder():
+            if self.upload_dialog is None or not self.upload_dialog.winfo_exists():
+                self.upload_dialog = UploadDialog(self, directory)
+            self.upload_dialog.lift()
+            self.upload_dialog.focus_set()
 
     def _turn_changed(self, _event=None):
         if self.result is None:
@@ -219,6 +243,8 @@ class ControllerMixin:
         self.turn_options.current(0)
         s = self.result['summary']
         self.conversation_stats.configure(text=f'{s["turns"]} turns · {s["activities"]} activities')
+        if export_folder(self.result):
+            self.export_actions.pack(fill='x', pady=(6, 0))
         self._turn_changed()
 
     def _clear_chat(self):

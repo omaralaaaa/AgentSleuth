@@ -8,10 +8,13 @@ from contextlib import closing
 from pathlib import Path
 
 from ...core.export import session_directory
+from ...core.artifacts import ArtifactStore
 from ...core.utils import safe_text, short
+from .attachments import recover_uploads
 
 
 TRANSCRIPT = Path('.system_generated/logs/transcript.jsonl')
+TOOL_DISPLAY_METADATA = {'toolSummary', 'toolAction', 'WaitMsBeforeAsync'}
 PROMPT_TAG = re.compile(r'<(/?)(USER_REQUEST|ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)'
                         r'[ \t]*(?:>|(?=\r?$))', re.MULTILINE)
 
@@ -166,6 +169,13 @@ def reconstruct_from_thread(path, thread, output_root=None, progress=None):
     elif path.parent.name == 'conversations' and path.suffix.lower() == '.db':
         source = _related(path.parent.parent, thread['id'], path)
     turns, user_records = [], []
+    attachments = []
+    session = source.parents[2] if source.as_posix().endswith('/' + TRANSCRIPT.as_posix()) else None
+    store = None
+    if output_root is not None:
+        title = thread.get('export_title', thread.get('name'))
+        destination = session_directory(output_root, 'Antigravity', thread['id'], title)
+        store = ArtifactStore(destination, [session.parent.parent if session else source.parent])
     ordinal = activities = tool_calls = messages = 0
     indexed_only = thread.get('indexed') and source == path
     records = () if indexed_only else _records(source)
@@ -176,24 +186,31 @@ def reconstruct_from_thread(path, thread, output_root=None, progress=None):
         if kind == 'USER_INPUT':
             user_records.append(step)
             content = _user_prompt(step)
+            uploads = recover_uploads(step, session / '.user_uploaded' if session else None, store)
+            attachments.extend(uploads)
         else:
             content = safe_text(step.get('content'))
         base = dict(agent='antigravity', timestamp_label=safe_text(step.get('created_at')),
                     timestamp=safe_text(step.get('created_at')), step_index=step.get('step_index'),
                     status=step.get('status'), truncated_fields=step.get('truncated_fields'))
         entries = []
-        if kind in ('USER_INPUT', 'PLANNER_RESPONSE') and content:
+        if (kind == 'USER_INPUT' and (content or uploads)) or (kind == 'PLANNER_RESPONSE' and content):
             entry = dict(base, kind='message', role='user' if kind == 'USER_INPUT' else 'assistant',
                          text=content)
             if kind == 'USER_INPUT':
                 entry['raw'] = step
+                entry['file_links'] = uploads
             entries.append(entry)
             messages += 1
         for call in step.get('tool_calls') or []:
             if isinstance(call, dict):
+                arguments = call.get('args')
+                if isinstance(arguments, dict):
+                    arguments = {key: value for key, value in arguments.items()
+                                 if key not in TOOL_DISPLAY_METADATA}
                 entries.append(dict(base, kind='activity', activity_type='ToolExecution',
-                                    part_type='Tool request', tool_name=call.get('name'), text=safe_text(call),
-                                    evidence=safe_text(call)))
+                                    part_type='Tool request', tool_name=call.get('name'),
+                                    tool_arguments=arguments, raw=call))
                 tool_calls += 1
         if not entries and kind != 'USER_INPUT':
             # Preserve unfamiliar step kinds and recorded errors; never infer a
@@ -216,12 +233,12 @@ def reconstruct_from_thread(path, thread, output_root=None, progress=None):
         detail = 'Summary only · no generated transcript or readable trajectory database beside this index'
     elif source.suffix.lower() == '.db':
         detail += ' · step metadata only (binary payloads are not decoded)'
-    directory = None
-    if output_root is not None:
-        title = thread.get('export_title', thread.get('name'))
-        directory = session_directory(output_root, 'Antigravity', thread['id'], title)
     return dict(thread=thread, turns=turns, user_records=user_records,
-                output_directory=str(directory) if directory else None,
+                attachments=attachments,
+                attachment_failures=[a for a in attachments if a['status'] == 'unavailable'],
+                output_directory=str(store.directory) if store else None,
                 source_path=str(source), source_detail=detail,
                 summary=dict(turns=len(turns), activities=activities, messages=messages,
-                             tool_calls=tool_calls, max_ordinal=ordinal, attachments=0, recovered_files=0))
+                             tool_calls=tool_calls, max_ordinal=ordinal,
+                             attachments=sum(a['status'] == 'extracted' for a in attachments),
+                             recovered_files=0))

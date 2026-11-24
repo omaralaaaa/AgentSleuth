@@ -1,10 +1,10 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["PySide6-Essentials>=6.12,<7"]
 # ///
 """Alternative Python launcher for AgentSleuth."""
 
-from agentsleuth.ui.app import main
+from agentsleuth.ui.qt_app import main
 
 if __name__ == "__main__":
-    main(__file__)
+    raise SystemExit(main(__file__))

@@ -4,15 +4,16 @@ AgentSleuth is a local desktop viewer for investigating conversations recorded b
 
 ## Run the viewer
 
-Install Python 3.10 or newer with Tkinter. AgentSleuth uses the Python standard library. From a terminal:
+Install Python 3.10 or newer. AgentSleuth uses Qt through PySide6 Essentials.
 
 ```shell
 git clone https://github.com/omaralaaaa/AgentSleuth.git
 cd AgentSleuth
+python -m pip install .
 python main.py
 ```
 
-Cloning requires access to the repository. If you already have a checkout, run the last command from its root. To check whether your Python installation includes Tk, run `python -m tkinter`; a small test window should open.
+Cloning requires access to the repository. Once installed, you can also launch it with the `agentsleuth` command. Run `python main.py --demo` to try a synthetic 1,000-entry transcript.
 
 ## Choose the evidence source
 
@@ -45,6 +46,8 @@ Each result represents one agent folder. Use the row checkboxes or the **Select 
 
 AgentSleuth creates export folders when it saves an artifact. Files go under the agent and conversation title, in `attachments/` or `recovered_files/` according to the artifact type. When a title folder is already taken, AgentSleuth adds a short session ID suffix.
 
+When a selected conversation has exported files, **Open export folder** opens its session directory. **Uploads by prompt** lists the recorded uploads beneath their prompts and shows the corresponding exported filenames. Select a prompt or file to read the full prompt text.
+
 ### Codex
 
 AgentSleuth reads the SQLite thread list and reconstructs selected messages and activities from rollout records. Each user prompt displays the permission settings recorded in its turn context, or **Not recorded** when those settings are missing. Execution cards show recorded commands and output; PowerShell commands use syntax highlighting.
@@ -71,7 +74,7 @@ On the inspected Windows installation, the index is under `%USERPROFILE%\.gemini
 | `conversations/<session-id>.db` with a `steps` table | Ordered step indexes and recorded numeric type/status values. Binary step payloads are not decoded. |
 | Summary index only | Session title and recorded workspace. Selecting the session explains why transcript content is unavailable. |
 
-Generated JSONL takes precedence over SQLite step metadata. Requests and result steps remain separate when the transcript provides no matching call ID. Standalone legacy `.pb` conversations are unsupported.
+Generated JSONL takes precedence over SQLite step metadata. Keep each session's `.user_uploaded/` folder alongside `.system_generated/` to export uploads linked to user prompts. Requests and result steps remain separate when the transcript provides no matching call ID. Standalone legacy `.pb` conversations are unsupported.
 
 ## Troubleshooting
 
@@ -84,12 +87,6 @@ Generated JSONL takes precedence over SQLite step metadata. Requests and result 
 
 ## Development
 
-Run the regression suite from the repository root. GUI tests need a Python installation with Tk and a usable display.
+The [provider packages](agentsleuth/parsers/) handle evidence discovery and reconstruction. [Shared core code](agentsleuth/core/) handles search, paths and artifact storage. The [Qt viewer](agentsleuth/ui/qt_app.py) runs reconstruction on per-tab background workers and mounts transcript cards near the visible area.
 
-```shell
-python -m unittest discover -s tests -v
-```
-
-The [provider packages](agentsleuth/parsers/) handle evidence discovery and reconstruction. [Shared core code](agentsleuth/core/) handles search, paths and artifact storage. The [Tkinter viewer](agentsleuth/ui/) runs reconstruction on per-tab background workers.
-
-To add a provider, implement `load_threads(path)` and `reconstruct_from_thread(path, thread, output_root, progress)`. Return a thread ID, display name and working directory for discovery, and ordered turns, entries and a summary for rendering. Register the provider in [the desktop app](agentsleuth/ui/app.py) and add fixtures and regression tests under [tests/](tests/).
+To add a provider, implement `load_threads(path)` and `reconstruct_from_thread(path, thread, output_root, progress)`. Return a thread ID, display name and working directory for discovery, and ordered turns, entries and a summary for rendering. Register the provider in the Qt viewer. Run `python main.py --benchmark 1000` to time transcript rendering.

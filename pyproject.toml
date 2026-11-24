@@ -1,9 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "agentsleuth"
 version = "0.2.2"
 description = "Desktop conversation forensics viewer for Codex, OpenCode, Claude Code, and Antigravity"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["PySide6-Essentials>=6.12,<7"]
+
+[project.gui-scripts]
+agentsleuth = "agentsleuth.ui.qt_app:main"
+
+[tool.setuptools.packages.find]
+include = ["agentsleuth*"]
 
 [tool.ruff]
 line-length = 100

@@ -37,7 +37,8 @@ def build_plan(index, query, kind, turn, collapsed, cached, cancelled):
             if is_powershell((entry.get('item') or {}).get('command'), command):
                 styles[key] = command_parts(command)
         elif arguments := shell_arguments(entry):
-            styles[key] = shell_command_parts(entry['execution']['tool'], arguments['command'])
+            tool = (entry.get('execution') or {}).get('tool') or entry.get('tool_name')
+            styles[key] = shell_command_parts(arguments.get('shell') or tool, arguments['command'])
     if not rows:
         rows.append(('empty', 'No matching entries in this view.'))
     return rows, {key for key, _ in rows}, total, hidden, styles

@@ -1,4 +1,7 @@
 .venv/
+/build/
+/*.egg-info/
+/tests/
 __pycache__/
 *.pyc
 AgentSleuth_Results/

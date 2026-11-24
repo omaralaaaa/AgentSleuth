@@ -5,7 +5,7 @@ import re
 from .powershell import command_parts, is_powershell
 
 
-SHELL_TOOLS = ('bash', 'shell', 'powershell', 'pwsh')
+SHELL_TOOLS = {'bash', 'shell', 'powershell', 'pwsh', 'run_command', 'exec_command', 'shell_command'}
 BASH_KEYWORDS = frozenset('if then elif else fi for while until do done case esac in function'.split())
 BASH_SEPARATORS = frozenset(('&&', '||', '|', ';', '&', '(', '{'))
 BASH_TOKENS = re.compile(r"""
@@ -23,12 +23,12 @@ BASH_TOKENS = re.compile(r"""
 
 def shell_arguments(entry):
     execution = entry.get('execution') or {}
-    tool = execution.get('tool')
-    arguments = execution.get('arguments')
-    if (entry.get('agent') in ('opencode', 'claude') and isinstance(tool, str) and tool.casefold() in SHELL_TOOLS
-            and isinstance(arguments, dict) and isinstance(arguments.get('command'), str)
-            and arguments['command'].strip()):
-        return arguments
+    tool = execution.get('tool') or entry.get('tool_name')
+    arguments = execution.get('arguments') if execution else entry.get('tool_arguments')
+    if isinstance(tool, str) and tool.casefold().removesuffix('.exe') in SHELL_TOOLS and isinstance(arguments, dict):
+        for key in ('command', 'CommandLine'):
+            if isinstance(command := arguments.get(key), str) and command.strip():
+                return dict(arguments, command=command)
     return None
 
 

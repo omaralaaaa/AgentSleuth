@@ -30,7 +30,8 @@ def filter_values(entry):
         values.add('Attachments')
     elif activity == 'ERROR_MESSAGE':
         values.add('Errors')
-    if entry.get('attachments') or entry.get('file_refs'):
+    if entry.get('attachments') or entry.get('file_refs') or any(
+            'mime' in link and 'uri' in link for link in (entry.get('file_links') or ())):
         values.add('Attachments')
     if activity:
         detail = entry.get('part_type') if activity == 'raw_part' else activity
@@ -68,11 +69,13 @@ class TranscriptIndex:
                     self.response_counts[key] = self.response_counts.get(key, 0) + 1
                 fields = ('text', 'command', 'timestamp', 'ordinal', 'role', 'phase', 'activity_type',
                           'status', 'cwd', 'pid', 'exit_code', 'correlation_note', 'file_refs', 'attachments',
-                          'session_id', 'message_id', 'part_id', 'call_id', 'part_type', 'evidence')
+                          'session_id', 'message_id', 'part_id', 'call_id', 'part_type', 'evidence',
+                          'tool_name', 'tool_arguments')
                 item = entry.get('item') or {}
                 values = [entry[k] for k in fields if k in entry]
                 values.extend(item[k] for k in ('aggregated_output', 'changes', 'stdout', 'stderr',
                               'server', 'tool', 'name', 'arguments', 'result', 'error') if k in item)
+                values.extend(link['filename'] for link in (entry.get('file_links') or ()) if 'filename' in link)
                 execution = entry.get('execution') or {}
                 values.extend(execution[k] for k in ('tool', 'arguments', 'partial_input', 'status',
                               'output', 'error', 'metadata', 'start_label', 'end_label') if k in execution)

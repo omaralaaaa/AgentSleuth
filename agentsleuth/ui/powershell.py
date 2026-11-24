@@ -31,7 +31,13 @@ def is_powershell(argv, text):
             return True
         if len(argv) > 1:
             return False
-    return bool(re.match(r'\s*(?:[\w]+-[A-Za-z]\w*\b|\$[\w:]+\s*=)', text))
+    if re.match(r'\s*(?:&\s*)?(?:"[^"\r\n]*[\\/])?(?:powershell|pwsh)(?:\.exe)?(?=["\s]|$)', text, re.I):
+        return True
+    return bool(re.search(
+        r'(?:^|[|;\n({=])\s*(?:(?:Get|Set|New|Remove|Copy|Move|Rename|Select|Where|ForEach|'
+        r'Write|Read|Test|Invoke|Import|Export|ConvertTo|ConvertFrom|Start|Stop|Out|Sort|'
+        r'Format|Join|Split|Resolve|Measure|Add|Clear|Push|Pop)-[A-Za-z]\w*\b|\$[\w:]+\s*=)'
+        r'|\$env:[a-z_]\w*', text, re.I))
 
 
 def command_parts(text, *, tokens=TOKENS, keywords=KEYWORDS, separators='|;&({='):
