@@ -161,13 +161,6 @@ def _records(path):
                            content=f"Recorded step type {row['step_type']} · status {row['status']}")
 
 
-_USER_REQUEST = re.compile(
-    r'\A\s*\\?<USER_REQUEST>\\?(?:\r?\n)?(?P<request>.*?)'
-    r'(?:\\?\r?\n)?\\?</USER_REQUEST>(?=\\?\s*(?:\Z|\\?<(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>))',
-    re.DOTALL,
-)
-
-
 def reconstruct_from_thread(path, thread, output_root=None, progress=None):
     path = Path(path).resolve()
     source = path

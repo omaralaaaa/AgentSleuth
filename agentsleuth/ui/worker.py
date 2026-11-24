@@ -1,4 +1,4 @@
-"""Run one agent's evidence jobs independently of Tk and other agents."""
+"""Run one agent's evidence jobs independently of the UI and other agents."""
 
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue

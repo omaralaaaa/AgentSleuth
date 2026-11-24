@@ -41,7 +41,7 @@ def is_powershell(argv, text):
 
 
 def command_parts(text, *, tokens=TOKENS, keywords=KEYWORDS, separators='|;&({='):
-    # Insert tagged spans directly so offsets work for Unicode on every Tk build.
+    # Keep text and tags together so the renderer can apply colors without offsets.
     parts = []
     pos = 0
     command_position = True
@@ -57,12 +57,3 @@ def command_parts(text, *, tokens=TOKENS, keywords=KEYWORDS, separators='|;&({='
     if pos < len(text):
         parts.extend((text[pos:], ()))
     return parts
-
-
-def insert_command(widget, text, parts=None):
-    for name, color in COLORS.items():
-        widget.tag_configure(name, foreground=color)
-    if parts is None:
-        parts = command_parts(text)
-    if parts:
-        widget.insert('1.0', *parts)

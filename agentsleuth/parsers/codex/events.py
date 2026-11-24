@@ -4,7 +4,7 @@ import json
 import re
 
 from .attachments import all_embedded_refs, extract_file_markers, extract_text_and_media
-from ...core.utils import safe_text, short
+from ...core.utils import safe_text
 from .metadata import get_turn
 
 
@@ -39,37 +39,6 @@ def classify(record):
         if item_kind in mapping:
             return mapping[item_kind], item_kind
     return None
-
-def describe(record, category):
-    p = record.get("payload") or {}
-    item = p.get("item") or {}
-    if category == "Tool Call":
-        return f"{p.get('name', 'tool')} | {short(p.get('input') or p.get('arguments'), 180)}"
-    if category == "Tool Output":
-        return f"{p.get('call_id', '')} | {short(p.get('output'), 160)}"
-    if category == "Command Execution":
-        cmd = item.get("command") or []
-        cmd_text = cmd[-1] if isinstance(cmd, list) and cmd else cmd
-        return f"exit={item.get('exit_code')} pid={item.get('process_id')} | {short(cmd_text, 160)}"
-    if category == "File Changes":
-        changes = item.get("changes") or {}
-        return f"{item.get('status', '')} | {short(', '.join(changes.keys()), 170)}"
-    if category == "MCP Tool Calling":
-        return f"{item.get('server', '')}/{item.get('tool', '')} | {short(item.get('arguments'), 120)}"
-    content = p.get("content") or item.get("content") or []
-    if isinstance(content, str):
-        return short(content)
-    if isinstance(content, list):
-        chunks = []
-        for part in content:
-            if not isinstance(part, dict):
-                continue
-            if part.get("type") in ("input_image", "input_audio"):
-                chunks.append("[" + part["type"] + "]")
-            elif isinstance(part.get("text"), str):
-                chunks.append(part["text"])
-        return short(" | ".join(chunks), 220)
-    return short(content)
 
 def normalize_message(record):
     p = record.get("payload") or {}

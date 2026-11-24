@@ -1,4 +1,4 @@
-"""Shared transcript card text and recorded fields for desktop frontends."""
+"""Prepare transcript card text and recorded fields for the viewer."""
 
 import json
 import ntpath

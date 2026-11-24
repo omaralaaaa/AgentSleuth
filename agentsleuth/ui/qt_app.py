@@ -333,7 +333,7 @@ class AgentPane(QFrame):
         self.reset_conversation()
         thread = self.threads[index]
         self.thread_title.setText(thread['name'])
-        self.thread_cwd.setText('Working directory (cwd): ' + (thread.get('cwd') or 'Unknown'))
+        self.thread_cwd.setText('Working directory: ' + (thread.get('cwd') or 'Unknown'))
         self.thread_source.setText(thread.get('source_detail') or 'Rollout: ' + (
             thread.get('rollout_path') or 'Not recorded'))
         if index in self.cache:
@@ -463,7 +463,7 @@ class Viewer(QMainWindow):
             self.export_root = export_root
         except (OSError, RuntimeError, ValueError) as error:
             export_error = f'Could not validate export directory · {error}'
-        self.setWindowTitle('AgentSleuth — Forensic Conversation Viewer')
+        self.setWindowTitle('AgentSleuth — Agent Conversation Viewer')
         self.resize(1390, 830)
         self.setMinimumSize(900, 620)
         self.scanner = None

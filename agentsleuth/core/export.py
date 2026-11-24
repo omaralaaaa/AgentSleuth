@@ -119,7 +119,3 @@ class ExportSession:
             candidate = f'{prefix}{numbered})'
             counter += 1
         return self.parent / candidate
-
-
-def session_directory(root, agent, session_id, title=None):
-    return ExportSession(root, agent, session_id, title).directory

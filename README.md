@@ -1,10 +1,12 @@
 # AgentSleuth
 
-AgentSleuth is a local desktop viewer for investigating conversations recorded by coding agents. Open an evidence source, select a session, and follow each user prompt through the agent's replies, tool calls, recorded output, and file changes. A separate tab handles each agent's storage format.
+![A terminal prompt in a magnifying glass beside a branching conversation tree](assets/branding/agentsleuth-banner.png)
 
-## Run the viewer
+AgentSleuth is a local desktop viewer for investigating conversations recorded by AI agents. It reconstructs sessions from **Codex**, **OpenCode**, **Claude Code**, and **Antigravity**. Follow each prompt through the agent's replies, tool executions, recorded output, and file changes in a searchable conversation tree.
 
-Install Python 3.10 or newer. AgentSleuth uses Qt through PySide6 Essentials.
+AgentSleuth opens source evidence read-only and writes recovered files and attachments to a separate export directory.
+
+## Quick start
 
 ```shell
 git clone https://github.com/omaralaaaa/AgentSleuth.git
@@ -13,81 +15,81 @@ python -m pip install .
 python main.py
 ```
 
-Cloning requires access to the repository. Once installed, you can also launch it with the `agentsleuth` command. Run `python main.py --demo` to try a synthetic 1,000-entry transcript.
+You can also launch the installed viewer with `agentsleuth`. Run `python main.py --demo` to try a synthetic conversation without loading evidence.
 
-## Choose the evidence source
+## Open evidence
 
-| Tab | File to open | What to keep alongside it |
+| Agent | Source to open | Companion evidence |
 | --- | --- | --- |
-| Codex | `state_5.sqlite` | The session rollout JSONL files referenced by the database. Preserve their `sessions/` directory structure when copying evidence. |
-| OpenCode | `opencode.db` | Sessions, messages, file parts and tool state are in SQLite. Embedded uploads can be recovered from the database itself. |
-| Claude Code | `history.jsonl` | The sibling `projects/` tree contains session transcripts. Keep `file-history/` if you need available file snapshots. |
-| Antigravity | `conversation_summaries.db` | Keep the sibling `brain/` and `conversations/` trees. You can also open a generated `transcript.jsonl` or an individual trajectory `.db` directly. |
+| Codex | `state_5.sqlite` or another supported `state_*.sqlite` database | The referenced rollout JSONL files. Preserve their `sessions/` or `archived_sessions/` directory structure. |
+| OpenCode | `opencode.db` | Sessions, messages, parts, and tool results are stored in the database. |
+| Claude Code | `history.jsonl` | The sibling `projects/` tree contains session transcripts. Keep `file-history/` for available file backups. |
+| Antigravity | `conversation_summaries.db`, a generated `transcript.jsonl`, or a trajectory `.db` | Preserve `brain/` and `conversations/`, including any session uploads and scratch files. |
 
-For SQLite evidence, use a consistent snapshot. Recent records may still be in a database's `-wal` file. Copying only the main database from a running application can produce an incomplete timeline.
+Use a consistent snapshot for SQLite evidence. Recent records may still be in the `-wal` file, so a copy of the main database alone can have an incomplete timeline.
 
-## Investigate a conversation
+### Scan for sources
 
-### Discover evidence automatically
+Click **Scan for artifacts…** above the agent tabs.
 
-Click **Scan for artifacts…** above the agent tabs. **Scan this PC** checks known evidence directories in your home directory and in accessible Windows profiles. It includes Antigravity CLI data under `~/.gemini/antigravity-cli/` and follows the configured data locations for Codex, Claude Code, and OpenCode. **Scan evidence folder…** searches beneath a directory you select, such as the top of a KAPE collection or its extracted C-drive folder. You can select the collection even when the user profiles are nested several levels down. Raw disk-image files must first be mounted or extracted.
+- **Scan this PC** checks known evidence locations under your home directory and accessible Windows profiles. It also checks locations configured with `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and `XDG_DATA_HOME`, and looks for Antigravity CLI evidence under `~/.gemini/antigravity-cli/`.
+- **Scan evidence folder…** searches a selected folder, such as a KAPE collection with nested user profiles. Mount or extract a raw disk image before scanning its contents.
 
-Each result represents one agent folder. Use the row checkboxes or the **Select all** button to choose folders, then click **Open selected**. Double-click a folder name to open it individually. Each source loads its own conversation list. Multiple sources for the same agent open in separate tabs. The scanner resolves the index automatically, choosing the highest numbered Codex state database when several are present. Antigravity folders without an index can list sessions from generated transcripts and trajectory databases. Scroll horizontally to inspect long paths.
+Use the checkboxes or **Select all**, then click **Open selected**. Double-click a folder name to open that source by itself. Multiple sources for the same agent open in separate tabs. When a folder contains several Codex state databases, the scanner selects the highest numbered one.
 
-### Open a source manually
+### Browse for a source
 
-1. Select an agent tab and click **Browse** to pick and load its source file. If you type or paste a path, press **Enter** to load it.
-2. The default export directory is `AgentSleuth_Export/` beside the application script. **Change folder** selects a shared directory for all agent tabs and saves the choice for future launches.
-3. Select a conversation in the sidebar. The sidebar filter searches conversation names, working directories, and IDs. Each tab loads and caches its own sessions.
-4. Press **Ctrl+F** to search the selected transcript. Terms are case-insensitive and can appear in any order. The filter lists values present in the selected conversation or turn, including exact tool names, activity types, and recorded statuses. For example, a recorded Bash call can match **Commands**, **Tool calls**, or **Tool: bash**. Filtering by a tool name also includes failed attempts. Tree view keeps a matching reply's parent prompt for context.
-5. Responses and tool calls are grouped under each prompt in Tree view. Click the response count to collapse or expand that prompt's replies. Long text blocks scroll independently. Click an extracted filename to reveal its copy in the file manager.
+Select the agent tab and click **Browse** to load a source file. You can also paste its path and press **Enter**. To open an Antigravity folder directly, paste the directory containing `brain/` or `conversations/`.
 
-## Interpret the results
+## Review a conversation
 
-AgentSleuth creates export folders when it saves an artifact. Files go under the agent and conversation title. Attachments go to `attachments/`, recovered file changes go to `recovered_files/`, and Antigravity scratch files go to `scratch/`. When a title folder is already taken, AgentSleuth adds a short session ID suffix.
+1. Select a session in the **Conversation Index** to reconstruct it. The sidebar filter matches titles, working directories, and session IDs.
+2. Press **Ctrl+F** to search the transcript. Search terms are case-insensitive and can appear in any order. Select **Entire conversation** or a specific turn, then narrow the results by activity type, tool name, or recorded status.
+3. Click the response count beneath a prompt to expand or collapse its replies. Matching replies keep their parent prompt for context. Long tool outputs scroll inside their cards.
 
-When a selected conversation has exported files, **Open export folder** opens its session directory. **Uploads by prompt** lists the recorded uploads beneath their prompts and shows the corresponding exported filenames. Select a prompt or file to read the full prompt text.
+## Recover files and attachments
 
-### Codex
+Click an exported filename to reveal the copy in your file manager. **Open export folder** opens the session's directory. **Uploads by prompt** links recorded uploads to their prompts, which you can read in full by selecting a prompt or file.
 
-AgentSleuth reads the SQLite thread list and reconstructs selected messages and activities from rollout records. Each user prompt displays the permission settings recorded in its turn context, or **Not recorded** when those settings are missing. Execution cards show recorded commands and output; PowerShell commands use syntax highlighting.
+When you run `python main.py`, the default export root is `AgentSleuth_Export/` beside the script. The installed `agentsleuth` command uses `AgentSleuth_Export/` in the current directory by default. **Change folder** saves a custom location shared by all tabs. Pass `--export-root PATH` to use a different location for one launch.
 
-Tool-call IDs, turn boundaries, ordinal ranges and command matches help correlate activity. A correlation note identifies inferred relationships. File-change recovery and attachment extraction use bytes or content present in the rollout.
+Exports are grouped by agent and sanitized conversation title. Missing titles use `Unnamed_Conversation`. When titles collide, AgentSleuth adds a short session ID suffix. The `attachments/`, `recovered_files/`, and Antigravity `scratch/` subfolders are created as files are saved.
 
-### OpenCode
+## Evidence coverage
 
-The parser links parts to their source messages, orders records by recorded sequence when available, and uses timestamps and IDs for fallback ordering. Repeated snapshots of a tool call within one message contribute to one execution card. Step boundaries and reasoning parts are omitted from the displayed timeline.
-
-Embedded file-part uploads produce copies under `OpenCode/<session-hash>/attachments/` in the results folder. The file card shows MIME type, byte count and SHA-256. A path or remote URL without embedded bytes remains a reference. A decoding error stays associated with its file.
-
-### Claude Code
-
-The history index provides session discovery. The parser resolves the matching project transcript, preserves line order, and correlates tool uses and results within their branch. Sidechain records are tracked separately. Extracted evidence goes under `Claude/<session-id>/` in the results folder. Proposed writes and recovered backup copies are labeled according to the available evidence.
+- **Codex** reconstructs the rollout referenced by each thread. Prompt cards show the permission mode recorded in the turn context when available. Command cards show recorded output, with PowerShell syntax highlighting where applicable. Embedded files and recorded file changes can be exported. Inferred tool correlations are retained internally.
+- **OpenCode** uses recorded sequence fields when available and falls back to timestamps and IDs. Repeated tool states within one message contribute to one execution card. Step markers and reasoning are omitted from the timeline. Recovery supports embedded uploads, tool-result attachments, completed writes with recorded content, and edits with a complete recorded final version.
+- **Claude Code** groups history entries by session and reconstructs each conversation from its project transcript. Tool results are paired with their calls within the same branch. Recovery supports embedded attachments, complete recorded reads such as PDFs, writes, edits, and available file-history backups. Unconfirmed writes are labeled as proposed.
 
 ### Antigravity
 
-On the inspected Windows installation, the index is under `%USERPROFILE%\.gemini\antigravity\`. AgentSleuth resolves companion files relative to the **selected** evidence tree, so copied evidence can be investigated on another machine.
+AgentSleuth resolves session files within the selected evidence tree. When both formats are present, the generated transcript takes precedence over trajectory SQLite metadata.
 
-| Available session evidence | What the viewer can recover |
+| Session evidence | What the viewer can show or recover |
 | --- | --- |
-| `brain/<session-id>/.system_generated/logs/transcript.jsonl` | User prompts, planner replies, tool requests, recorded step output and errors. Each step retains its source index when available. Truncation markers identify incomplete source fields. |
-| `conversations/<session-id>.db` with a `steps` table | Ordered step indexes and recorded numeric type/status values. Binary step payloads are not decoded. |
-| Summary index only | Session title and recorded workspace. Selecting the session explains why transcript content is unavailable. |
-| `brain/<session-id>/scratch/` | A **Scratch files** section with searchable text previews and byte-for-byte copies in the session's `scratch/` export folder. |
+| `brain/<session-id>/.system_generated/logs/transcript.jsonl` | Prompts, replies, tool requests, recorded outputs, and errors. Step indices and truncation markers are shown when available. |
+| `conversations/<session-id>.db` with a `steps` table | Ordered step indices and recorded numeric types and statuses. |
+| Summary index only | Session title and recorded workspace. |
+| `brain/<session-id>/.user_uploaded/` | Available uploads linked to their recorded prompts. |
+| `brain/<session-id>/scratch/` | Session files copied byte for byte, with relative paths and searchable text previews up to 64 KiB. These files can be recovered with or without a transcript. |
 
-Generated JSONL takes precedence over SQLite step metadata. Keep each session's `.user_uploaded/` and `scratch/` folders alongside `.system_generated/`. Uploads are linked to their recorded prompts. Scratch files belong to the session and can be recovered even if the transcript is missing. The viewer shows relative paths and previews up to 64 KiB of readable text. Recovery skips symlinks, junctions, dependency directories, and common caches. Requests and result steps remain separate when the transcript provides no matching call ID. Standalone legacy `.pb` conversations are unsupported.
+Scratch recovery skips symlinks, junctions, dependency folders, and common caches. Standalone legacy `.pb` files and binary step payloads are unsupported.
 
 ## Troubleshooting
 
 | Symptom | What to check |
 | --- | --- |
-| A session is listed but its transcript is missing | Check the companion paths in the source table. An index can survive after its detailed records have been moved or removed. |
-| A file is visible but has no clickable copy | Inspect its status. Reference-only records contain no embedded bytes; invalid or oversized payloads may fail extraction. |
+| A session is listed but its transcript is missing | Check the companion files and their directory structure. The index can remain after a transcript is moved or removed. |
+| A filename has no clickable copy | Check its status. The source may contain only a path, or the recorded content may be incomplete, invalid, or oversized. |
 | A newly recorded event is missing | Refresh your evidence snapshot, then reload the source to clear that tab's session cache. |
-| The viewer starts but a search looks empty | Use **Clear** to reset the query and type filter, then select **Entire conversation** to search all turns. |
+| Search results are empty | Click **Clear** to reset the search and filter. Select **Entire conversation** to search all turns. |
 
 ## Development
 
-The [provider packages](agentsleuth/parsers/) handle evidence discovery and reconstruction. [Shared core code](agentsleuth/core/) handles search, paths and artifact storage. The [Qt viewer](agentsleuth/ui/qt_app.py) runs reconstruction on per-tab background workers and mounts transcript cards near the visible area.
+Run `python main.py` from the checkout when editing the viewer. Use `python -m pip install -e .` to make the installed `agentsleuth` command use the checkout as well.
 
-To add a provider, implement `load_threads(path)` and `reconstruct_from_thread(path, thread, output_root, progress)`. Return a thread ID, display name and working directory for discovery, and ordered turns, entries and a summary for rendering. Register the provider in the Qt viewer. Run `python main.py --benchmark 1000` to time transcript rendering.
+- Providers implement `load_threads(path)` for session discovery and `reconstruct_from_thread(path, thread, output_root, progress)` for conversation reconstruction. See the [provider packages](agentsleuth/parsers/).
+- Search indexing, path handling, and artifact storage live in [core](agentsleuth/core/).
+- Register new providers in the [Qt viewer](agentsleuth/ui/qt_app.py). Each tab runs its own background worker and renders cards near the visible area.
+
+Run `python main.py --benchmark 1000` to measure transcript rendering with a synthetic conversation.
