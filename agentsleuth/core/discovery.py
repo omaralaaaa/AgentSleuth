@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+ANTIGRAVITY_FOLDERS = ('antigravity', 'antigravity-ide', 'antigravity-cli')
+AGENT_FOLDERS = ('.codex', '.claude', 'opencode', *ANTIGRAVITY_FOLDERS)
+
+
 @dataclass(frozen=True)
 class Finding:
     agent: str
@@ -28,7 +32,7 @@ def _folders(directory, files, subdirs):
     if name == '.claude' or ('history.jsonl' in files and 'projects' in subdirs):
         source = files.get('history.jsonl')
         yield Finding('Claude Code', directory, source, 'history.jsonl' if source else 'Missing history.jsonl')
-    if name in ('antigravity', 'antigravity-ide') or 'conversation_summaries.db' in files:
+    if name in ANTIGRAVITY_FOLDERS or 'conversation_summaries.db' in files:
         source = files.get('conversation_summaries.db')
         if source:
             yield Finding('Antigravity', directory, source, source.name)
@@ -49,8 +53,10 @@ def live_roots():
             pass
     for profile in sorted(profiles):
         for rel in ('.codex', '.claude', '.local/share/opencode', 'AppData/Local/opencode',
-                    'AppData/Roaming/opencode', '.gemini/antigravity', '.gemini/antigravity-ide'):
+                    'AppData/Roaming/opencode'):
             yield profile / rel
+        for name in ANTIGRAVITY_FOLDERS:
+            yield profile / '.gemini' / name
     for var, suffix in [('CODEX_HOME', ''), ('CLAUDE_CONFIG_DIR', ''), ('XDG_DATA_HOME', 'opencode')]:
         if os.environ.get(var):
             yield Path(os.environ[var]) / suffix
@@ -85,7 +91,7 @@ def scan(roots, cancelled, progress, *, known_locations=False):
             matches = list(_folders(directory, files, {p.name.casefold() for p in children}))
             for hit in matches:
                 found[(hit.agent, hit.path)] = hit
-            agent_root = directory.name.casefold() in ('.codex', '.claude', 'opencode', 'antigravity', 'antigravity-ide')
+            agent_root = directory.name.casefold() in AGENT_FOLDERS
             if not known_locations and not (agent_root and matches):
                 pending.extend(children)
             visited += 1

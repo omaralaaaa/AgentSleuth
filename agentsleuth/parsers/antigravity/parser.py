@@ -17,6 +17,7 @@ from .scratch import recover_scratch, scratch_directory
 TRANSCRIPT = Path('.system_generated/logs/transcript.jsonl')
 SESSION_ID = re.compile(r'[A-Za-z0-9_-]{1,160}')
 TOOL_DISPLAY_METADATA = {'toolSummary', 'toolAction', 'WaitMsBeforeAsync'}
+CONTEXT_STEPS = {'EPHEMERAL_MESSAGE', 'KNOWLEDGE_ARTIFACT', 'KNOWLEDGE_ARTIFACTS', 'CONVERSATION_HISTORY'}
 PROMPT_TAG = re.compile(r'<(/?)(USER_REQUEST|ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)'
                         r'[ \t]*(?:>|(?=\r?$))', re.MULTILINE)
 
@@ -202,6 +203,8 @@ def reconstruct_from_thread(path, thread, output_root=None, progress=None):
         if progress and n % 200 == 0:
             progress(f'Reading Antigravity evidence · {n:,} steps')
         kind = step['type']
+        if kind in CONTEXT_STEPS:
+            continue
         if kind == 'USER_INPUT':
             user_records.append(step)
             content = _user_prompt(step)

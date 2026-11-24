@@ -30,7 +30,7 @@ For SQLite evidence, use a consistent snapshot. Recent records may still be in a
 
 ### Discover evidence automatically
 
-Click **Scan for artifacts…** above the agent tabs. **Scan this PC** checks known agent directories in accessible Windows user profiles. **Scan evidence folder…** searches beneath a directory you select, such as the top of a KAPE collection or its extracted C-drive folder. You can select the collection even when the user profiles are nested several levels down. Raw disk-image files must first be mounted or extracted.
+Click **Scan for artifacts…** above the agent tabs. **Scan this PC** checks known evidence directories in your home directory and in accessible Windows profiles. It includes Antigravity CLI data under `~/.gemini/antigravity-cli/` and follows the configured data locations for Codex, Claude Code, and OpenCode. **Scan evidence folder…** searches beneath a directory you select, such as the top of a KAPE collection or its extracted C-drive folder. You can select the collection even when the user profiles are nested several levels down. Raw disk-image files must first be mounted or extracted.
 
 Each result represents one agent folder. Use the row checkboxes or the **Select all** button to choose folders, then click **Open selected**. Double-click a folder name to open it individually. Each source loads its own conversation list. Multiple sources for the same agent open in separate tabs. The scanner resolves the index automatically, choosing the highest numbered Codex state database when several are present. Antigravity folders without an index can list sessions from generated transcripts and trajectory databases. Scroll horizontally to inspect long paths.
 
