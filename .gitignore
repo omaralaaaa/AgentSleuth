@@ -2,6 +2,7 @@
 /build/
 /*.egg-info/
 /tests/
+/script.py
 __pycache__/
 *.pyc
 AgentSleuth_Results/
